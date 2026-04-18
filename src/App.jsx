@@ -8,6 +8,8 @@ const VISIT_TYPES = ["Routine Visit", "Prospecting", "Follow-up", "Key Account R
 const PIPELINE_STATUSES = ["Prospecting", "Follow-up", "Negotiation", "Converted", "Dormant"];
 const ROLES = ["ASM", "RSM", "NSM", "Sales Operations Admin"];
 const ADMIN_ROLES = ["NSM", "Sales Operations Admin"];
+const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwQIVyacsmcIhySMROBUXTtOuGpH-GO1scyU5L7za__mFRLKYL0ttK8hJk5EeWZROuo5g/exec";
+const DEFAULT_LOGO_URL = "https://drive.google.com/thumbnail?id=15ZeFX5OUlXVKvJt409-WpiYzcevUUG-l&sz=w1000";
 
 function nowISO() {
   return new Date().toISOString();
@@ -192,11 +194,20 @@ function useLocalCache() {
 }
 function useSettings() {
   const [settings, setSettings] = useState(() => {
+    const defaults = {
+      appsScriptUrl: DEFAULT_APPS_SCRIPT_URL,
+      apiKey: "",
+      logoUrl: DEFAULT_LOGO_URL,
+      autoPullEnabled: false,
+      autoPullSeconds: 60,
+      autoPushEnabled: false,
+      autoPushSeconds: 120,
+    };
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
-      return raw ? JSON.parse(raw) : { appsScriptUrl: "", apiKey: "", autoPullEnabled: false, autoPullSeconds: 60, autoPushEnabled: false, autoPushSeconds: 120 };
+      return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
     } catch {
-      return { appsScriptUrl: "", apiKey: "", autoPullEnabled: false, autoPullSeconds: 60, autoPushEnabled: false, autoPushSeconds: 120 };
+      return defaults;
     }
   });
   useEffect(() => { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }, [settings]);
@@ -257,26 +268,135 @@ function getVisibleManagers(allManagers, currentManager) {
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "#f8fafc", padding: 16, fontFamily: "Arial, sans-serif", color: "#0f172a" },
-  container: { maxWidth: 1280, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 },
-  card: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: 16, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
-  button: { border: "1px solid #cbd5e1", background: "#0f172a", color: "#fff", borderRadius: 10, padding: "10px 14px", cursor: "pointer" },
-  buttonSecondary: { border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", borderRadius: 10, padding: "10px 14px", cursor: "pointer" },
-  input: { width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, boxSizing: "border-box" },
-  textarea: { width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, boxSizing: "border-box", minHeight: 90 },
-  select: { width: "100%", border: "1px solid #cbd5e1", borderRadius: 10, padding: 10, boxSizing: "border-box", background: "#fff" },
-  grid2: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
-  grid4: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
+  page: {
+    minHeight: "100vh",
+    background: "linear-gradient(180deg, #f8fafc 0%, #f0fdf4 100%)",
+    padding: 20,
+    fontFamily: 'Inter, Arial, sans-serif',
+    color: "#0f172a",
+  },
+  container: {
+    maxWidth: 1280,
+    margin: "0 auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+  },
+  card: {
+    background: "rgba(255,255,255,0.92)",
+    border: "1px solid #e2e8f0",
+    borderRadius: 20,
+    padding: 18,
+    boxShadow: "0 10px 30px rgba(15,23,42,0.06)",
+    backdropFilter: "blur(8px)",
+  },
+  button: {
+    border: "1px solid #22c55e",
+    background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
+    color: "#ffffff",
+    borderRadius: 12,
+    padding: "10px 16px",
+    cursor: "pointer",
+    fontWeight: 600,
+    boxShadow: "0 8px 20px rgba(34,197,94,0.22)",
+  },
+  buttonSecondary: {
+    border: "1px solid #dbe4ee",
+    background: "#ffffff",
+    color: "#0f172a",
+    borderRadius: 12,
+    padding: "10px 16px",
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  input: {
+    width: "100%",
+    border: "1px solid #dbe4ee",
+    borderRadius: 12,
+    padding: 12,
+    boxSizing: "border-box",
+    background: "#ffffff",
+    color: "#0f172a",
+  },
+  textarea: {
+    width: "100%",
+    border: "1px solid #dbe4ee",
+    borderRadius: 12,
+    padding: 12,
+    boxSizing: "border-box",
+    minHeight: 90,
+    background: "#ffffff",
+    color: "#0f172a",
+  },
+  select: {
+    width: "100%",
+    border: "1px solid #dbe4ee",
+    borderRadius: 12,
+    padding: 12,
+    boxSizing: "border-box",
+    background: "#ffffff",
+    color: "#0f172a",
+  },
+  grid2: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 },
+  grid4: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 },
   tableWrap: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", padding: 10, borderBottom: "1px solid #e2e8f0", fontSize: 13, color: "#475569" },
-  td: { padding: 10, borderBottom: "1px solid #e2e8f0", fontSize: 14 },
-  badge: { display: "inline-block", background: "#e2e8f0", padding: "4px 8px", borderRadius: 999, fontSize: 12 },
-  tabs: { display: "flex", flexWrap: "wrap", gap: 8 },
-  tab: (active) => ({ border: "1px solid #cbd5e1", background: active ? "#0f172a" : "#fff", color: active ? "#fff" : "#0f172a", borderRadius: 10, padding: "10px 14px", cursor: "pointer" }),
-  label: { display: "block", fontSize: 13, marginBottom: 6, color: "#475569" },
-  modalBackdrop: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 },
-  modal: { width: "min(960px, 100%)", maxHeight: "90vh", overflow: "auto", background: "#fff", borderRadius: 16, padding: 20, border: "1px solid #e2e8f0" },
+  th: {
+    textAlign: "left",
+    padding: 12,
+    borderBottom: "1px solid #edf2f7",
+    fontSize: 12,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "#64748b",
+  },
+  td: {
+    padding: 12,
+    borderBottom: "1px solid #edf2f7",
+    fontSize: 14,
+    color: "#0f172a",
+  },
+  badge: {
+    display: "inline-block",
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "5px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+  },
+  tabs: { display: "flex", flexWrap: "wrap", gap: 10 },
+  tab: (active) => ({
+    border: active ? "1px solid #bbf7d0" : "1px solid #dbe4ee",
+    background: active ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)" : "rgba(255,255,255,0.92)",
+    color: active ? "#ffffff" : "#0f172a",
+    borderRadius: 12,
+    padding: "10px 16px",
+    cursor: "pointer",
+    fontWeight: 600,
+    boxShadow: active ? "0 8px 20px rgba(34,197,94,0.18)" : "none",
+  }),
+  label: { display: "block", fontSize: 13, marginBottom: 6, color: "#475569", fontWeight: 600 },
+  modalBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15,23,42,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    zIndex: 50,
+  },
+  modal: {
+    width: "min(960px, 100%)",
+    maxHeight: "90vh",
+    overflow: "auto",
+    background: "#ffffff",
+    borderRadius: 22,
+    padding: 22,
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 18px 50px rgba(15,23,42,0.18)",
+  },
 };
 
 function Field({ label, children }) {
@@ -302,7 +422,67 @@ function Modal({ open, title, children, onClose }) {
   );
 }
 function PermissionBanner({ role, title, message }) {
-  return <Card><div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}><div><div style={{ fontSize: 13, color: "#64748b" }}>{title}</div><div style={{ fontSize: 14, fontWeight: 600 }}>{message}</div></div><Badge>{role}</Badge></div></Card>;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 13, color: "#64748b" }}>{title}</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{message}</div>
+        </div>
+        <Badge>{role}</Badge>
+      </div>
+    </Card>
+  );
+}
+
+function LogoBlock({ logoUrl, compact = false }) {
+  const fallbackUrl = "https://drive.google.com/thumbnail?id=15ZeFX5OUlXVKvJt409-WpiYzcevUUG-l&sz=w1000";
+  const [currentLogo, setCurrentLogo] = useState(logoUrl || fallbackUrl);
+
+  useEffect(() => {
+    setCurrentLogo(logoUrl || fallbackUrl);
+  }, [logoUrl]);
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: compact ? 10 : 14 }}>
+      <div
+        style={{
+          width: compact ? 44 : 56,
+          height: compact ? 44 : 56,
+          borderRadius: compact ? 12 : 16,
+          background: "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)",
+          border: "1px solid #bbf7d0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          boxShadow: "0 8px 20px rgba(34,197,94,0.14)",
+        }}
+      >
+        {currentLogo ? (
+          <img
+            src={currentLogo}
+            alt="TMDK logo"
+            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#fff" }}
+            onError={() => {
+              if (currentLogo !== fallbackUrl) setCurrentLogo(fallbackUrl);
+              else setCurrentLogo("");
+            }}
+          />
+        ) : (
+          <span style={{ fontWeight: 800, color: "#166534", fontSize: compact ? 16 : 20 }}>T</span>
+        )}
+      </div>
+      <div>
+        <div style={{ fontWeight: 800, fontSize: compact ? 18 : 22, letterSpacing: "-0.02em" }}>
+          TMDK Sales Force
+        </div>
+        <div style={{ color: "#64748b", fontSize: compact ? 12 : 13 }}>
+          Pipeline, field execution, and manager intelligence
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function LoginScreen({ settings, setSettings, onLogin }) {
@@ -312,17 +492,46 @@ function LoginScreen({ settings, setSettings, onLogin }) {
   const [loading, setLoading] = useState(false);
   return (
     <div style={styles.page}>
-      <div style={{ ...styles.container, maxWidth: 960, minHeight: "80vh", justifyContent: "center" }}>
-        <div style={styles.grid2}>
+      <div style={{ ...styles.container, maxWidth: 1080, minHeight: "80vh", justifyContent: "center" }}>
+        <div style={{ ...styles.grid2, alignItems: "stretch" }}>
           <Card>
-            <h1 style={{ marginTop: 0 }}>TMDK Sales Force</h1>
-            <p style={{ color: "#64748b" }}>Simplified plain React version for deployment.</p>
-            <div style={{ display: "grid", gap: 12 }}>
-              <Field label="Apps Script Web App URL"><input style={styles.input} value={settings.appsScriptUrl} onChange={(e) => setSettings((s) => ({ ...s, appsScriptUrl: e.target.value }))} placeholder="https://script.google.com/macros/s/.../exec" /></Field>
-              <Field label="Optional API Key"><input style={styles.input} value={settings.apiKey} onChange={(e) => setSettings((s) => ({ ...s, apiKey: e.target.value }))} /></Field>
+            <LogoBlock logoUrl={settings.logoUrl} />
+            <div style={{ marginTop: 22, display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gap: 10 }}>
+                {[
+                  "Role-based visibility for ASM, RSM, NSM, and Sales Operations Admin",
+                  "Incremental merge sync with Google Apps Script backend",
+                  "Visit planning, pipeline tracking, exports, and audit trail",
+                ].map((item) => (
+                  <div key={item} style={{ display: "flex", gap: 10, alignItems: "flex-start", color: "#475569" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 999, background: "#22c55e", marginTop: 5 }} />
+                    <div>{item}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                <div style={{ border: "1px solid #edf2f7", borderRadius: 16, padding: 14, background: "#ffffff" }}>
+                  <div style={{ color: "#64748b", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>Live sync</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>Pull / Push</div>
+                </div>
+                <div style={{ border: "1px solid #edf2f7", borderRadius: 16, padding: 14, background: "#ffffff" }}>
+                  <div style={{ color: "#64748b", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>Currency</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>NGN</div>
+                </div>
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>Secure sign in</div>
+            <h2 style={{ marginTop: 10, marginBottom: 8 }}>Access your sales workspace</h2>
+            <p style={{ color: "#64748b", marginTop: 0 }}>Sign in with your assigned credentials.</p>
+            <div style={{ border: "1px solid #edf2f7", borderRadius: 14, padding: 12, background: "#ffffff", color: "#64748b", fontSize: 13 }}>
+              Backend URL and company logo are already configured in the code.
+            </div>
+            <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
               <Field label="Email"><input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
               <Field label="Password"><input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-              {status ? <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{status}</div> : null}
+              {status ? <div style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{status}</div> : null}
               <Button onClick={async () => {
                 try {
                   setLoading(true);
@@ -336,16 +545,8 @@ function LoginScreen({ settings, setSettings, onLogin }) {
                   setLoading(false);
                 }
               }} disabled={loading}>Sign In</Button>
+              <div style={{ color: "#64748b", fontSize: 13 }}>Use your role email and password to continue.</div>
             </div>
-          </Card>
-          <Card>
-            <h3 style={{ marginTop: 0 }}>Backend checklist</h3>
-            <ol style={{ paddingLeft: 20, color: "#475569" }}>
-              <li>Deploy Apps Script backend as Web App</li>
-              <li>Run <code>seedInitialBackendData()</code></li>
-              <li>Paste the /exec URL here</li>
-              <li>Login with <code>nsm@tmdk.com</code> / <code>1234</code></li>
-            </ol>
           </Card>
         </div>
       </div>
@@ -353,8 +554,17 @@ function LoginScreen({ settings, setSettings, onLogin }) {
   );
 }
 
-function AppHeader({ session, onLogout, onChangePassword }) {
-  return <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><div><h1 style={{ margin: 0 }}>TMDK Sales Force</h1><div style={{ color: "#64748b", marginTop: 4 }}>Plain React deployment-friendly version</div></div><div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><Card><div style={{ fontSize: 14 }}><strong>{session?.name}</strong><br /><span style={{ color: "#64748b" }}>{session?.email} • {session?.role}</span></div></Card><Button secondary onClick={onChangePassword}>Change Password</Button><Button secondary onClick={onLogout}>Sign Out</Button></div></div>;
+function AppHeader({ session, onLogout, onChangePassword, logoUrl }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <LogoBlock logoUrl={logoUrl} compact />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Card><div style={{ fontSize: 14 }}><strong>{session?.name}</strong><br /><span style={{ color: "#64748b" }}>{session?.email} • {session?.role}</span></div></Card>
+        <Button secondary onClick={onChangePassword}>Change Password</Button>
+        <Button secondary onClick={onLogout}>Sign Out</Button>
+      </div>
+    </div>
+  );
 }
 
 function Filters({ filters, setFilters, managers, customers }) {
@@ -414,7 +624,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
       <div style={styles.grid2}>
         <Card>
           <h3 style={{ marginTop: 0 }}>Pipeline Mix</h3>
-          <div style={{ display: "grid", gap: 10 }}>{byPipeline.map((row) => <div key={row.label}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>{row.label}</span><span>{row.value}</span></div><div style={{ height: 8, background: "#e2e8f0", borderRadius: 999 }}><div style={{ height: 8, background: "#0f172a", borderRadius: 999, width: `${totalVisits ? Math.round((row.value / totalVisits) * 100) : 0}%` }} /></div></div>)}</div>
+          <div style={{ display: "grid", gap: 10 }}>{byPipeline.map((row) => <div key={row.label}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>{row.label}</span><span>{row.value}</span></div><div style={{ height: 8, background: "#dcfce7", borderRadius: 999 }}><div style={{ height: 8, background: "#16a34a", borderRadius: 999, width: `${totalVisits ? Math.round((row.value / totalVisits) * 100) : 0}%` }} /></div></div>)}</div>
         </Card>
         <Card>
           <h3 style={{ marginTop: 0 }}>Manager Performance</h3>
@@ -423,7 +633,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
       </div>
       <div style={styles.grid2}>
         <Card><h3 style={{ marginTop: 0 }}>Role Access Summary</h3><div style={{ color: "#475569", display: "grid", gap: 8 }}><div><strong>ASM:</strong> sees personal dashboard and activities.</div><div><strong>RSM:</strong> sees personal dashboard plus ASMs in assigned region.</div><div><strong>NSM / Sales Ops Admin:</strong> sees everything.</div></div></Card>
-        <Card><h3 style={{ marginTop: 0 }}>Upcoming Follow-ups</h3><div style={{ display: "grid", gap: 8 }}>{upcomingFollowUps.length ? upcomingFollowUps.map((v) => <div key={v.id} style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 10 }}><div style={{ fontWeight: 600 }}>{v.customer?.name}</div><div style={{ color: "#64748b", fontSize: 13 }}>{v.manager?.name} • {v.nextActionDate}</div></div>) : <div style={{ color: "#64748b" }}>No upcoming follow-ups.</div>}</div></Card>
+        <Card><h3 style={{ marginTop: 0 }}>Upcoming Follow-ups</h3><div style={{ display: "grid", gap: 8 }}>{upcomingFollowUps.length ? upcomingFollowUps.map((v) => <div key={v.id} style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 10 }}><div style={{ fontWeight: 600 }}>{v.customer?.name}</div><div style={{ color: "#64748b", fontSize: 13 }}>{v.manager?.name} • {v.nextActionDate}</div></div>) : <div style={{ color: "#64748b" }}>No upcoming follow-ups.</div>}</div></Card>
       </div>
     </div>
   );
@@ -706,15 +916,15 @@ function ExportTab({ managers, customers, visits, auditLog, authUsers, settings,
       <Card>
         <h3 style={{ marginTop: 0 }}>Backend Sync Settings</h3>
         <div style={styles.grid2}>
-          <Field label="Apps Script Web App URL"><input style={styles.input} value={settings.appsScriptUrl} onChange={(e) => setSettings((s) => ({ ...s, appsScriptUrl: e.target.value }))} /></Field>
-          <Field label="Optional API Key"><input style={styles.input} value={settings.apiKey} onChange={(e) => setSettings((s) => ({ ...s, apiKey: e.target.value }))} /></Field>
+          <Field label="Backend URL"><input style={styles.input} value={settings.appsScriptUrl} readOnly /></Field>
+          <Field label="Logo URL"><input style={styles.input} value={settings.logoUrl || ""} readOnly /></Field>
           <Field label="Auto Pull"><label><input type="checkbox" checked={Boolean(settings.autoPullEnabled)} onChange={(e) => setSettings((s) => ({ ...s, autoPullEnabled: e.target.checked }))} /> Refresh automatically</label></Field>
           <Field label="Auto Pull Seconds"><input style={styles.input} type="number" min="15" value={settings.autoPullSeconds || 60} onChange={(e) => setSettings((s) => ({ ...s, autoPullSeconds: Math.max(15, Number(e.target.value || 60)) }))} /></Field>
           <Field label="Auto Push"><label><input type="checkbox" checked={Boolean(settings.autoPushEnabled)} onChange={(e) => setSettings((s) => ({ ...s, autoPushEnabled: e.target.checked }))} /> Push automatically</label></Field>
           <Field label="Auto Push Seconds"><input style={styles.input} type="number" min="30" value={settings.autoPushSeconds || 120} onChange={(e) => setSettings((s) => ({ ...s, autoPushSeconds: Math.max(30, Number(e.target.value || 120)) }))} /></Field>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}><Button secondary onClick={onPull} disabled={syncing}>Pull & Merge</Button><Button onClick={onPush} disabled={syncing}>Push Incremental Merge</Button></div>
-        <div style={{ marginTop: 12, border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{syncStatus}</div>
+        <div style={{ marginTop: 12, border: "1px solid #ecfdf5", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{syncStatus}</div>
       </Card>
       <Card>
         <h3 style={{ marginTop: 0 }}>Exports</h3>
@@ -746,7 +956,7 @@ function ChangePasswordDialog({ open, onClose, onSubmit }) {
       <div style={{ display: "grid", gap: 12 }}>
         <Field label="Current Password"><input style={styles.input} type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} /></Field>
         <Field label="New Password"><input style={styles.input} type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></Field>
-        {status ? <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{status}</div> : null}
+        {status ? <div style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 12, background: "#f8fafc" }}>{status}</div> : null}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><Button secondary onClick={onClose}>Cancel</Button><Button onClick={async () => { try { setStatus("Changing password..."); await onSubmit(currentPassword, newPassword); setStatus("Password changed successfully."); onClose(); } catch (error) { setStatus(error instanceof Error ? error.message : "Password change failed."); } }}>Update Password</Button></div>
       </div>
     </Modal>
@@ -848,8 +1058,14 @@ export default function TMDKSalesForceApp() {
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <AppHeader session={session} onLogout={async () => { try { await backendLogout(settings, session); } catch (_) {} setSession(null); }} onChangePassword={() => setShowChangePassword(true)} />
-        <div style={styles.grid4}>{[{ label: "Managers", value: db.managers.filter((m) => !m.deletedAt).length }, { label: "Customers", value: db.customers.filter((c) => !c.deletedAt).length }, { label: "Visits", value: db.visits.filter((v) => !v.deletedAt).length }, { label: "Current Access", value: session.role }, { label: "Audit Entries", value: db.auditLog.filter((a) => !a.deletedAt).length }].map((kpi) => <Card key={kpi.label}><div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div><div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div></Card>)}</div>
+        <AppHeader session={session} logoUrl={settings.logoUrl} onLogout={async () => { try { await backendLogout(settings, session); } catch (_) {} setSession(null); }} onChangePassword={() => setShowChangePassword(true)} />
+        <div style={styles.grid4}>{[
+          { label: "Managers", value: db.managers.filter((m) => !m.deletedAt).length, icon: "👥" },
+          { label: "Customers", value: db.customers.filter((c) => !c.deletedAt).length, icon: "🏢" },
+          { label: "Visits", value: db.visits.filter((v) => !v.deletedAt).length, icon: "📍" },
+          { label: "Current Access", value: session.role, icon: "🛡️" },
+          { label: "Audit Entries", value: db.auditLog.filter((a) => !a.deletedAt).length, icon: "🧾" },
+        ].map((kpi) => <Card key={kpi.label}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div><div style={{ width: 34, height: 34, borderRadius: 12, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{kpi.icon}</div></div><div style={{ fontSize: 24, fontWeight: 700, marginTop: 10 }}>{kpi.value}</div></Card>)}</div>
         <Card><div>{syncStatus}</div></Card>
         <Filters filters={filters} setFilters={setFilters} managers={visibleManagers} customers={db.customers.filter((c) => !c.deletedAt)} />
         <div style={styles.tabs}>{tabs.map((t) => <button key={t.id} style={styles.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}</div>

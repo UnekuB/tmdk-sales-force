@@ -3,13 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://YOUR_USERNAME.github.io/tmdk-sales-force",
+  "homepage": "https://UnekuB.github.io/tmdk-sales-force",
   "scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "preview": "vite preview",
-  "predeploy": "npm run build",
-  "deploy": "gh-pages -d dist"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
 },
   "dependencies": {
     "framer-motion": "^12.38.0",
