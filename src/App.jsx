@@ -486,8 +486,8 @@ function LogoBlock({ logoUrl, compact = false }) {
 }
 
 function LoginScreen({ settings, setSettings, onLogin }) {
-  const [email, setEmail] = useState("nsm@tmdk.com");
-  const [password, setPassword] = useState("1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   return (
