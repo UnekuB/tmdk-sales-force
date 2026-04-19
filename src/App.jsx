@@ -149,7 +149,7 @@ function sanitizeRows(rows) {
   });
 }
 function defaultManagerForm() { return { name: "", role: "ASM", region: "", statesText: "", email: "", phone: "", reportsTo: "", active: true }; }
-function defaultCustomerForm() { return { name: "", customerType: "Farm", salesType: "Direct", region: "", state: "", city: "", address: "", contactPerson: "", phone: "", email: "", segment: "Prospect", active: true }; }
+function defaultCustomerForm() { return { name: "", customerType: "Farm", salesType: "Direct", region: "", state: "", city: "", address: "", contactPerson: "", phone: "", email: "", segment: "Prospect", ownerManagerId: "", active: true }; }
 function defaultVisitForm() { return { visitDate: todayISO(), managerId: "", customerId: "", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "", outcome: "", comments: "", orderMade: false, orderQtyMt: 0, orderValueNgn: 0, pipelineStatus: "Prospecting", nextActionDate: todayISO(), visitStatus: "Planned", salesType: "Direct" }; }
 
 const seedCache = normalizeDb({
@@ -161,8 +161,8 @@ const seedCache = normalizeDb({
     withMeta({ id: "M005", name: "Sales Operations Admin", role: "Sales Operations Admin", region: "All Regions", states: [], email: "salesops@tmdk.com", phone: "08030000005", reportsTo: "M004", active: true, createdAt: nowISO() }, "system"),
   ],
   customers: [
-    withMeta({ id: "C001", name: "Gidan Gona Farms", customerType: "Farm", salesType: "Direct", region: "North West", state: "Kaduna", city: "Zaria", address: "Zaria, Kaduna State", contactPerson: "Musa Aliyu", phone: "08040000001", email: "musa@gidangona.com", segment: "Prospect", active: true, createdAt: nowISO() }, "system"),
-    withMeta({ id: "C002", name: "Arewa Agro Traders", customerType: "Distributor", salesType: "Indirect", region: "North West", state: "Kano", city: "Kano", address: "Kano State", contactPerson: "Aisha Bello", phone: "08040000002", email: "aisha@arewaagro.com", segment: "Key Account", active: true, createdAt: nowISO() }, "system"),
+    withMeta({ id: "C001", name: "Gidan Gona Farms", customerType: "Farm", salesType: "Direct", region: "North West", state: "Kaduna", city: "Zaria", address: "Zaria, Kaduna State", contactPerson: "Musa Aliyu", phone: "08040000001", email: "musa@gidangona.com", segment: "Prospect", ownerManagerId: "M001", active: true, createdAt: nowISO() }, "system"),
+    withMeta({ id: "C002", name: "Arewa Agro Traders", customerType: "Distributor", salesType: "Indirect", region: "North West", state: "Kano", city: "Kano", address: "Kano State", contactPerson: "Aisha Bello", phone: "08040000002", email: "aisha@arewaagro.com", segment: "Key Account", ownerManagerId: "M003", active: true, createdAt: nowISO() }, "system"),
   ],
   visits: [
     withMeta({ id: "V001", visitDate: todayISO(), managerId: "M001", customerId: "C001", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "Introduce product and assess feed demand", outcome: "Prospecting", comments: "Customer requested price list.", orderMade: false, orderQtyMt: 0, orderValueNgn: 0, pipelineStatus: "Follow-up", nextActionDate: addDays(todayISO(), 5), visitStatus: "Completed", salesType: "Direct", createdAt: nowISO() }, "system"),
@@ -265,6 +265,21 @@ function getVisibleManagers(allManagers, currentManager) {
   if (ADMIN_ROLES.includes(currentManager.role)) return allManagers.filter((m) => !m.deletedAt);
   if (currentManager.role === "RSM") return allManagers.filter((m) => !m.deletedAt && (m.id === currentManager.id || (m.role === "ASM" && m.region === currentManager.region)));
   return allManagers.filter((m) => !m.deletedAt && m.id === currentManager.id);
+}
+
+function getVisibleCustomers(allCustomers, allManagers, currentManager) {
+  if (!currentManager) return [];
+  const customers = allCustomers.filter((c) => !c.deletedAt);
+  if (ADMIN_ROLES.includes(currentManager.role)) return customers;
+  if (currentManager.role === "RSM") return customers.filter((c) => c.region === currentManager.region);
+  const coveredStates = Array.isArray(currentManager.states) ? currentManager.states : [];
+  return customers.filter((c) => coveredStates.includes(c.state) || c.ownerManagerId === currentManager.id);
+}
+
+function getVisibleVisits(allVisits, allCustomers, allManagers, currentManager) {
+  const visibleCustomerIds = new Set(getVisibleCustomers(allCustomers, allManagers, currentManager).map((c) => c.id));
+  const visibleManagerIds = new Set(getVisibleManagers(allManagers, currentManager).map((m) => m.id));
+  return allVisits.filter((v) => !v.deletedAt && visibleCustomerIds.has(v.customerId) && visibleManagerIds.has(v.managerId));
 }
 
 const styles = {
@@ -592,8 +607,8 @@ function Filters({ filters, setFilters, managers, customers }) {
 function Dashboard({ visits, customers, managers, currentManager, filters }) {
   const visibleManagers = getVisibleManagers(managers, currentManager);
   const visibleManagerIds = visibleManagers.map((m) => m.id);
-  const activeCustomers = customers.filter((c) => !c.deletedAt);
-  const activeVisits = visits.filter((v) => !v.deletedAt);
+  const activeCustomers = getVisibleCustomers(customers, managers, currentManager);
+  const activeVisits = getVisibleVisits(visits, customers, managers, currentManager);
   const enrichedVisits = activeVisits.map((v) => ({ ...v, manager: managers.find((m) => m.id === v.managerId), customer: customers.find((c) => c.id === v.customerId) }));
   const filteredVisits = enrichedVisits.filter((v) => {
     const dateOk = (!filters.from || v.visitDate >= filters.from) && (!filters.to || v.visitDate <= filters.to);
@@ -617,6 +632,16 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     return { name: manager?.name || id, visits: rows.length, converted: rows.filter((r) => r.orderMade || r.pipelineStatus === "Converted").length, value: rows.reduce((sum, r) => sum + Number(r.orderValueNgn || 0), 0), mt: rows.reduce((sum, r) => sum + Number(r.orderQtyMt || 0), 0) };
   }).filter((row) => row.visits > 0).sort((a, b) => b.visits - a.visits);
   const upcomingFollowUps = filteredVisits.filter((v) => v.nextActionDate >= todayISO() && v.pipelineStatus !== "Converted").sort((a, b) => a.nextActionDate.localeCompare(b.nextActionDate)).slice(0, 5);
+  const territoryRows = Array.from(new Set(activeCustomers.map((c) => `${c.region}|||${c.state}`))).map((key) => {
+    const [region, state] = key.split("|||");
+    const territoryCustomers = activeCustomers.filter((c) => c.region === region && c.state === state);
+    const territoryCustomerIds = new Set(territoryCustomers.map((c) => c.id));
+    const territoryVisits = filteredVisits.filter((v) => territoryCustomerIds.has(v.customerId));
+    const territoryConverted = territoryVisits.filter((v) => v.orderMade || v.pipelineStatus === "Converted").length;
+    const territoryValue = territoryVisits.reduce((sum, v) => sum + Number(v.orderValueNgn || 0), 0);
+    const territoryMt = territoryVisits.reduce((sum, v) => sum + Number(v.orderQtyMt || 0), 0);
+    return { region, state, customers: territoryCustomers.length, visits: territoryVisits.length, converted: territoryConverted, conversionPct: territoryVisits.length ? ((territoryConverted / territoryVisits.length) * 100).toFixed(1) : "0.0", mt: territoryMt, value: territoryValue };
+  }).sort((a, b) => b.value - a.value);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={styles.grid4}>
@@ -633,9 +658,13 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
         </Card>
       </div>
       <div style={styles.grid2}>
-        <Card><h3 style={{ marginTop: 0 }}>Role Access Summary</h3><div style={{ color: "#475569", display: "grid", gap: 8 }}><div><strong>ASM:</strong> sees personal dashboard and activities.</div><div><strong>RSM:</strong> sees personal dashboard plus ASMs in assigned region.</div><div><strong>NSM / Sales Ops Admin:</strong> sees everything.</div></div></Card>
+        <Card><h3 style={{ marginTop: 0 }}>Role Access Summary</h3><div style={{ color: "#475569", display: "grid", gap: 8 }}><div><strong>ASM:</strong> sees owned or state-covered customers and related visits.</div><div><strong>RSM:</strong> sees all customers and visits within assigned region.</div><div><strong>NSM / Sales Ops Admin:</strong> sees everything.</div></div></Card>
         <Card><h3 style={{ marginTop: 0 }}>Upcoming Follow-ups</h3><div style={{ display: "grid", gap: 8 }}>{upcomingFollowUps.length ? upcomingFollowUps.map((v) => <div key={v.id} style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 10 }}><div style={{ fontWeight: 600 }}>{v.customer?.name}</div><div style={{ color: "#64748b", fontSize: 13 }}>{v.manager?.name} • {v.nextActionDate}</div></div>) : <div style={{ color: "#64748b" }}>No upcoming follow-ups.</div>}</div></Card>
       </div>
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Territory KPIs</h3>
+        <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["Region", "State", "Customers", "Visits", "Converted", "Conversion %", "Order MT", "Order Value"].map((h) => <th key={h} style={styles.th}>{h}</th>)}</tr></thead><tbody>{territoryRows.length ? territoryRows.map((t) => <tr key={`${t.region}-${t.state}`}><td style={styles.td}>{t.region}</td><td style={styles.td}>{t.state}</td><td style={styles.td}>{t.customers}</td><td style={styles.td}>{t.visits}</td><td style={styles.td}>{t.converted}</td><td style={styles.td}>{t.conversionPct}%</td><td style={styles.td}>{t.mt.toFixed(2)} MT</td><td style={styles.td}>{currency(t.value)}</td></tr>) : <tr><td style={styles.td} colSpan={8}>No territory records for selected filters.</td></tr>}</tbody></table></div>
+      </Card>
     </div>
   );
 }
@@ -695,19 +724,21 @@ function ManagersTab({ managers, authUsers, setDb, currentManager, session }) {
   );
 }
 
-function CustomersTab({ customers, setDb, session }) {
+function CustomersTab({ customers, managers, currentManager, setDb, session }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(defaultCustomerForm());
   const [search, setSearch] = useState("");
   const canManage = ["NSM", "Sales Operations Admin", "RSM", "ASM"].includes(session.role);
-  const rows = customers.filter((c) => !c.deletedAt && JSON.stringify(c).toLowerCase().includes(search.toLowerCase()));
+  const visibleCustomers = getVisibleCustomers(customers, managers, currentManager);
+  const rows = visibleCustomers.filter((c) => JSON.stringify(c).toLowerCase().includes(search.toLowerCase()));
   useEffect(() => {
-    setForm(editing ? { name: editing.name, customerType: editing.customerType, salesType: editing.salesType, region: editing.region, state: editing.state, city: editing.city, address: editing.address, contactPerson: editing.contactPerson, phone: editing.phone, email: editing.email, segment: editing.segment, active: editing.active } : defaultCustomerForm());
+    setForm(editing ? { name: editing.name, customerType: editing.customerType, salesType: editing.salesType, region: editing.region, state: editing.state, city: editing.city, address: editing.address, contactPerson: editing.contactPerson, phone: editing.phone, email: editing.email, segment: editing.segment, ownerManagerId: editing.ownerManagerId || "", active: editing.active } : defaultCustomerForm());
   }, [editing, open]);
   const saveCustomer = () => {
     setDb((db) => {
-      const payload = withMeta({ id: editing?.id || generateId("C", db.customers), ...form, createdAt: editing?.createdAt || nowISO() }, session.email);
+      const ownerId = form.ownerManagerId || (currentManager?.role === "ASM" ? currentManager.id : "");
+      const payload = withMeta({ id: editing?.id || generateId("C", db.customers), ...form, ownerManagerId: ownerId, createdAt: editing?.createdAt || nowISO() }, session.email);
       return addAuditEntry({ ...db, customers: editing ? db.customers.map((c) => (c.id === editing.id ? payload : c)) : [...db.customers, payload] }, session, editing ? "update" : "create", "customer", payload.id, `${editing ? "Updated" : "Created"} customer ${payload.name}`);
     });
     setOpen(false);
@@ -723,7 +754,7 @@ function CustomersTab({ customers, setDb, session }) {
       <PermissionBanner role={session.role} title="Customer permissions" message={canManage ? "You can add, edit, and soft-delete customers." : "You can only view customers."} />
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}><div><h3 style={{ margin: 0 }}>Customer Master</h3><div style={{ color: "#64748b", fontSize: 14 }}>Track direct and indirect sales customers.</div></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><input style={styles.input} placeholder="Search customers" value={search} onChange={(e) => setSearch(e.target.value)} />{canManage ? <Button onClick={() => { setEditing(null); setOpen(true); }}>Add Customer</Button> : null}</div></div>
-        <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["ID", "Name", "Type", "Region", "State", "Sales Type", "Segment", "Status"].map((h) => <th key={h} style={styles.th}>{h}</th>)}{canManage ? <th style={styles.th}>Actions</th> : null}</tr></thead><tbody>{rows.map((c) => <tr key={c.id}><td style={styles.td}>{c.id}</td><td style={styles.td}>{c.name}</td><td style={styles.td}>{c.customerType}</td><td style={styles.td}>{c.region}</td><td style={styles.td}>{c.state}</td><td style={styles.td}>{c.salesType}</td><td style={styles.td}>{c.segment}</td><td style={styles.td}>{c.active ? "Active" : "Inactive"}</td>{canManage ? <td style={styles.td}><div style={{ display: "flex", gap: 8 }}><Button secondary onClick={() => { setEditing(c); setOpen(true); }}>Edit</Button><Button secondary onClick={() => removeCustomer(c.id)}>Delete</Button></div></td> : null}</tr>)}</tbody></table></div>
+        <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["ID", "Name", "Type", "Region", "State", "Sales Type", "Segment", "Owner", "Status"].map((h) => <th key={h} style={styles.th}>{h}</th>)}{canManage ? <th style={styles.th}>Actions</th> : null}</tr></thead><tbody>{rows.map((c) => <tr key={c.id}><td style={styles.td}>{c.id}</td><td style={styles.td}>{c.name}</td><td style={styles.td}>{c.customerType}</td><td style={styles.td}>{c.region}</td><td style={styles.td}>{c.state}</td><td style={styles.td}>{c.salesType}</td><td style={styles.td}>{c.segment}</td><td style={styles.td}>{managers.find((m) => m.id === c.ownerManagerId)?.name || "—"}</td><td style={styles.td}>{c.active ? "Active" : "Inactive"}</td>{canManage ? <td style={styles.td}><div style={{ display: "flex", gap: 8 }}><Button secondary onClick={() => { setEditing(c); setOpen(true); }}>Edit</Button><Button secondary onClick={() => removeCustomer(c.id)}>Delete</Button></div></td> : null}</tr>)}</tbody></table></div>
       </Card>
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Customer" : "Add Customer"}>
         <div style={styles.grid2}>
@@ -731,6 +762,7 @@ function CustomersTab({ customers, setDb, session }) {
           <Field label="Customer Type"><input style={styles.input} value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value })} /></Field>
           <Field label="Sales Type"><select style={styles.select} value={form.salesType} onChange={(e) => setForm({ ...form, salesType: e.target.value })}>{SALES_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field>
           <Field label="Segment"><input style={styles.input} value={form.segment} onChange={(e) => setForm({ ...form, segment: e.target.value })} /></Field>
+          <Field label="Owner Manager"><select style={styles.select} value={form.ownerManagerId} onChange={(e) => setForm({ ...form, ownerManagerId: e.target.value })}><option value="">Unassigned</option>{getVisibleManagers(managers, currentManager).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
           <Field label="Region"><input style={styles.input} value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} /></Field>
           <Field label="State"><input style={styles.input} value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></Field>
           <Field label="City"><input style={styles.input} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></Field>
@@ -760,7 +792,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
   const canManage = ["NSM", "Sales Operations Admin", "RSM", "ASM"].includes(session.role);
   const visibleManagers = getVisibleManagers(managers, currentManager);
   const visibleManagerIds = visibleManagers.map((m) => m.id);
-  const activeCustomers = customers.filter((c) => !c.deletedAt);
+  const activeCustomers = getVisibleCustomers(customers, managers, currentManager);
   const rows = visits.filter((v) => !v.deletedAt).map((v) => ({ ...v, manager: managers.find((m) => m.id === v.managerId), customer: customers.find((c) => c.id === v.customerId) })).filter((v) => visibleManagerIds.includes(v.managerId)).filter((v) => JSON.stringify(v).toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.visitDate.localeCompare(a.visitDate));
   useEffect(() => {
     setForm(editing ? { visitDate: editing.visitDate, managerId: editing.managerId, customerId: editing.customerId, plannedAtStartOfDay: editing.plannedAtStartOfDay, visitType: editing.visitType, objective: editing.objective, outcome: editing.outcome, comments: editing.comments, orderMade: editing.orderMade, orderQtyMt: editing.orderQtyMt || 0, orderValueNgn: editing.orderValueNgn, pipelineStatus: editing.pipelineStatus, nextActionDate: editing.nextActionDate, visitStatus: editing.visitStatus, salesType: editing.salesType } : defaultVisitForm());
@@ -1073,7 +1105,7 @@ export default function TMDKSalesForceApp() {
         <div style={styles.tabs}>{tabs.map((t) => <button key={t.id} style={styles.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}</div>
         {tab === "dashboard" ? <Dashboard visits={db.visits} customers={db.customers} managers={db.managers} currentManager={currentManager} filters={filters} /> : null}
         {tab === "visits" ? <VisitsTab visits={db.visits} customers={db.customers} managers={db.managers} setDb={setDb} currentManager={currentManager} session={session} /> : null}
-        {tab === "customers" ? <CustomersTab customers={db.customers} setDb={setDb} session={session} /> : null}
+        {tab === "customers" ? <CustomersTab customers={db.customers} managers={db.managers} currentManager={currentManager} setDb={setDb} session={session} /> : null}
         {tab === "managers" ? <ManagersTab managers={db.managers} authUsers={db.authUsers} setDb={setDb} currentManager={currentManager} session={session} /> : null}
         {tab === "users" && isAdmin ? <UsersTab authUsers={db.authUsers} managers={db.managers} setDb={setDb} session={session} /> : null}
         {tab === "audit" && isAdmin ? <AuditTab auditLog={db.auditLog} session={session} /> : null}
