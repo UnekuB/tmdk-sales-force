@@ -150,7 +150,7 @@ function sanitizeRows(rows) {
 }
 function defaultManagerForm() { return { name: "", role: "ASM", region: "", statesText: "", email: "", phone: "", reportsTo: "", active: true }; }
 function defaultCustomerForm() { return { name: "", customerType: "Farm", salesType: "Direct", region: "", state: "", city: "", address: "", contactPerson: "", phone: "", email: "", segment: "Prospect", active: true }; }
-function defaultVisitForm() { return { visitDate: todayISO(), managerId: "", customerId: "", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "", outcome: "", comments: "", orderMade: false, orderValueNgn: 0, pipelineStatus: "Prospecting", nextActionDate: todayISO(), visitStatus: "Planned", salesType: "Direct" }; }
+function defaultVisitForm() { return { visitDate: todayISO(), managerId: "", customerId: "", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "", outcome: "", comments: "", orderMade: false, orderQtyMt: 0, orderValueNgn: 0, pipelineStatus: "Prospecting", nextActionDate: todayISO(), visitStatus: "Planned", salesType: "Direct" }; }
 
 const seedCache = normalizeDb({
   managers: [
@@ -165,7 +165,7 @@ const seedCache = normalizeDb({
     withMeta({ id: "C002", name: "Arewa Agro Traders", customerType: "Distributor", salesType: "Indirect", region: "North West", state: "Kano", city: "Kano", address: "Kano State", contactPerson: "Aisha Bello", phone: "08040000002", email: "aisha@arewaagro.com", segment: "Key Account", active: true, createdAt: nowISO() }, "system"),
   ],
   visits: [
-    withMeta({ id: "V001", visitDate: todayISO(), managerId: "M001", customerId: "C001", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "Introduce product and assess feed demand", outcome: "Prospecting", comments: "Customer requested price list.", orderMade: false, orderValueNgn: 0, pipelineStatus: "Follow-up", nextActionDate: addDays(todayISO(), 5), visitStatus: "Completed", salesType: "Direct", createdAt: nowISO() }, "system"),
+    withMeta({ id: "V001", visitDate: todayISO(), managerId: "M001", customerId: "C001", plannedAtStartOfDay: true, visitType: "Routine Visit", objective: "Introduce product and assess feed demand", outcome: "Prospecting", comments: "Customer requested price list.", orderMade: false, orderQtyMt: 0, orderValueNgn: 0, pipelineStatus: "Follow-up", nextActionDate: addDays(todayISO(), 5), visitStatus: "Completed", salesType: "Direct", createdAt: nowISO() }, "system"),
   ],
   auditLog: [],
   authUsers: [],
@@ -607,19 +607,20 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
   const completedVisits = filteredVisits.filter((v) => String(v.visitStatus || "").toLowerCase() === "completed").length;
   const convertedVisits = filteredVisits.filter((v) => v.orderMade || v.pipelineStatus === "Converted").length;
   const totalOrderValue = filteredVisits.reduce((sum, v) => sum + Number(v.orderValueNgn || 0), 0);
+  const totalOrderMt = filteredVisits.reduce((sum, v) => sum + Number(v.orderQtyMt || 0), 0);
   const plannedVisits = filteredVisits.filter((v) => v.plannedAtStartOfDay).length;
   const conversionRatio = totalVisits ? ((convertedVisits / totalVisits) * 100).toFixed(1) : "0.0";
   const byPipeline = PIPELINE_STATUSES.map((status) => ({ label: status, value: filteredVisits.filter((v) => v.pipelineStatus === status).length }));
   const byManager = visibleManagerIds.map((id) => {
     const manager = managers.find((m) => m.id === id);
     const rows = filteredVisits.filter((v) => v.managerId === id);
-    return { name: manager?.name || id, visits: rows.length, converted: rows.filter((r) => r.orderMade || r.pipelineStatus === "Converted").length, value: rows.reduce((sum, r) => sum + Number(r.orderValueNgn || 0), 0) };
+    return { name: manager?.name || id, visits: rows.length, converted: rows.filter((r) => r.orderMade || r.pipelineStatus === "Converted").length, value: rows.reduce((sum, r) => sum + Number(r.orderValueNgn || 0), 0), mt: rows.reduce((sum, r) => sum + Number(r.orderQtyMt || 0), 0) };
   }).filter((row) => row.visits > 0).sort((a, b) => b.visits - a.visits);
   const upcomingFollowUps = filteredVisits.filter((v) => v.nextActionDate >= todayISO() && v.pipelineStatus !== "Converted").sort((a, b) => a.nextActionDate.localeCompare(b.nextActionDate)).slice(0, 5);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={styles.grid4}>
-        {[{ label: "Total Visits", value: totalVisits }, { label: "Completed Visits", value: completedVisits }, { label: "Conversion Ratio", value: `${conversionRatio}%` }, { label: "Order Value", value: currency(totalOrderValue) }, { label: "Planned Visits", value: plannedVisits }].map((kpi) => <Card key={kpi.label}><div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div><div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div></Card>)}
+        {[{ label: "Total Visits", value: totalVisits }, { label: "Completed Visits", value: completedVisits }, { label: "Conversion Ratio", value: `${conversionRatio}%` }, { label: "Order Value", value: currency(totalOrderValue) }, { label: "Order Volume", value: `${totalOrderMt.toFixed(2)} MT` }, { label: "Planned Visits", value: plannedVisits }].map((kpi) => <Card key={kpi.label}><div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div><div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div></Card>)}
       </div>
       <div style={styles.grid2}>
         <Card>
@@ -628,7 +629,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
         </Card>
         <Card>
           <h3 style={{ marginTop: 0 }}>Manager Performance</h3>
-          <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["Manager", "Visits", "Converted", "Conversion %", "Order Value"].map((h) => <th key={h} style={styles.th}>{h}</th>)}</tr></thead><tbody>{byManager.length ? byManager.map((m) => <tr key={m.name}><td style={styles.td}>{m.name}</td><td style={styles.td}>{m.visits}</td><td style={styles.td}>{m.converted}</td><td style={styles.td}>{m.visits ? ((m.converted / m.visits) * 100).toFixed(1) : 0}%</td><td style={styles.td}>{currency(m.value)}</td></tr>) : <tr><td style={styles.td} colSpan={5}>No records for selected filters.</td></tr>}</tbody></table></div>
+          <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["Manager", "Visits", "Converted", "Conversion %", "Order MT", "Order Value"].map((h) => <th key={h} style={styles.th}>{h}</th>)}</tr></thead><tbody>{byManager.length ? byManager.map((m) => <tr key={m.name}><td style={styles.td}>{m.name}</td><td style={styles.td}>{m.visits}</td><td style={styles.td}>{m.converted}</td><td style={styles.td}>{m.visits ? ((m.converted / m.visits) * 100).toFixed(1) : 0}%</td><td style={styles.td}>{m.mt.toFixed(2)} MT</td><td style={styles.td}>{currency(m.value)}</td></tr>) : <tr><td style={styles.td} colSpan={6}>No records for selected filters.</td></tr>}</tbody></table></div>
         </Card>
       </div>
       <div style={styles.grid2}>
@@ -762,7 +763,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
   const activeCustomers = customers.filter((c) => !c.deletedAt);
   const rows = visits.filter((v) => !v.deletedAt).map((v) => ({ ...v, manager: managers.find((m) => m.id === v.managerId), customer: customers.find((c) => c.id === v.customerId) })).filter((v) => visibleManagerIds.includes(v.managerId)).filter((v) => JSON.stringify(v).toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.visitDate.localeCompare(a.visitDate));
   useEffect(() => {
-    setForm(editing ? { visitDate: editing.visitDate, managerId: editing.managerId, customerId: editing.customerId, plannedAtStartOfDay: editing.plannedAtStartOfDay, visitType: editing.visitType, objective: editing.objective, outcome: editing.outcome, comments: editing.comments, orderMade: editing.orderMade, orderValueNgn: editing.orderValueNgn, pipelineStatus: editing.pipelineStatus, nextActionDate: editing.nextActionDate, visitStatus: editing.visitStatus, salesType: editing.salesType } : defaultVisitForm());
+    setForm(editing ? { visitDate: editing.visitDate, managerId: editing.managerId, customerId: editing.customerId, plannedAtStartOfDay: editing.plannedAtStartOfDay, visitType: editing.visitType, objective: editing.objective, outcome: editing.outcome, comments: editing.comments, orderMade: editing.orderMade, orderQtyMt: editing.orderQtyMt || 0, orderValueNgn: editing.orderValueNgn, pipelineStatus: editing.pipelineStatus, nextActionDate: editing.nextActionDate, visitStatus: editing.visitStatus, salesType: editing.salesType } : defaultVisitForm());
   }, [editing, open]);
   const saveVisit = () => {
     setDb((db) => {
@@ -784,7 +785,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
       const newVisits = bulkSelected.map((customerId) => {
         const nextId = generateId("V", working);
         const customer = db.customers.find((c) => c.id === customerId);
-        const visit = withMeta({ id: nextId, visitDate: bulkVisitDate, managerId: bulkManagerId, customerId, plannedAtStartOfDay: true, visitType: bulkVisitType, objective: bulkObjective, outcome: "", comments: "", orderMade: false, orderValueNgn: 0, pipelineStatus: "Prospecting", nextActionDate: bulkVisitDate, visitStatus: "Planned", salesType: customer?.salesType || "Direct", createdAt: nowISO() }, session.email);
+        const visit = withMeta({ id: nextId, visitDate: bulkVisitDate, managerId: bulkManagerId, customerId, plannedAtStartOfDay: true, visitType: bulkVisitType, objective: bulkObjective, outcome: "", comments: "", orderMade: false, orderQtyMt: 0, orderValueNgn: 0, pipelineStatus: "Prospecting", nextActionDate: bulkVisitDate, visitStatus: "Planned", salesType: customer?.salesType || "Direct", createdAt: nowISO() }, session.email);
         working.push(visit);
         return visit;
       });
@@ -798,7 +799,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
       <PermissionBanner role={session.role} title="Visit permissions" message={canManage ? "You can create, edit, delete, and bulk-plan visits." : "You can only view visits."} />
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}><div><h3 style={{ margin: 0 }}>Visits</h3><div style={{ color: "#64748b", fontSize: 14 }}>Plan visits and track conversion pipeline.</div></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><input style={styles.input} placeholder="Search visits" value={search} onChange={(e) => setSearch(e.target.value)} />{canManage ? <Button secondary onClick={() => setBulkOpen(true)}>Bulk Plan</Button> : null}{canManage ? <Button onClick={() => { setEditing(null); setOpen(true); }}>Add Visit</Button> : null}</div></div>
-        <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["Date", "Manager", "Customer", "Visit Type", "Pipeline", "Order", "Order Value", "Status"].map((h) => <th key={h} style={styles.th}>{h}</th>)}{canManage ? <th style={styles.th}>Actions</th> : null}</tr></thead><tbody>{rows.map((v) => <tr key={v.id}><td style={styles.td}>{v.visitDate}</td><td style={styles.td}>{v.manager?.name}</td><td style={styles.td}>{v.customer?.name}</td><td style={styles.td}>{v.visitType}</td><td style={styles.td}><Badge>{v.pipelineStatus}</Badge></td><td style={styles.td}>{v.orderMade ? "Yes" : "No"}</td><td style={styles.td}>{currency(v.orderValueNgn)}</td><td style={styles.td}>{v.visitStatus}</td>{canManage ? <td style={styles.td}><div style={{ display: "flex", gap: 8 }}><Button secondary onClick={() => { setEditing(v); setOpen(true); }}>Edit</Button><Button secondary onClick={() => removeVisit(v.id)}>Delete</Button></div></td> : null}</tr>)}</tbody></table></div>
+        <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{["Date", "Manager", "Customer", "Visit Type", "Pipeline", "Order", "Order MT", "Order Value", "Status"].map((h) => <th key={h} style={styles.th}>{h}</th>)}{canManage ? <th style={styles.th}>Actions</th> : null}</tr></thead><tbody>{rows.map((v) => <tr key={v.id}><td style={styles.td}>{v.visitDate}</td><td style={styles.td}>{v.manager?.name}</td><td style={styles.td}>{v.customer?.name}</td><td style={styles.td}>{v.visitType}</td><td style={styles.td}><Badge>{v.pipelineStatus}</Badge></td><td style={styles.td}>{v.orderMade ? "Yes" : "No"}</td><td style={styles.td}>{Number(v.orderQtyMt || 0).toFixed(2)} MT</td><td style={styles.td}>{currency(v.orderValueNgn)}</td><td style={styles.td}>{v.visitStatus}</td>{canManage ? <td style={styles.td}><div style={{ display: "flex", gap: 8 }}><Button secondary onClick={() => { setEditing(v); setOpen(true); }}>Edit</Button><Button secondary onClick={() => removeVisit(v.id)}>Delete</Button></div></td> : null}</tr>)}</tbody></table></div>
       </Card>
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Visit" : "Add Visit"}>
         <div style={styles.grid2}>
@@ -813,6 +814,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
           <Field label="Pipeline Status"><select style={styles.select} value={form.pipelineStatus} onChange={(e) => setForm({ ...form, pipelineStatus: e.target.value })}>{PIPELINE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select></Field>
           <Field label="Comments"><textarea style={styles.textarea} value={form.comments} onChange={(e) => setForm({ ...form, comments: e.target.value })} /></Field>
           <Field label="Order Made"><label><input type="checkbox" checked={form.orderMade} onChange={(e) => setForm({ ...form, orderMade: e.target.checked })} /> Order Made</label></Field>
+          <Field label="Order Quantity (MT)"><input style={styles.input} type="number" step="0.01" value={form.orderQtyMt} onChange={(e) => setForm({ ...form, orderQtyMt: Number(e.target.value || 0) })} /></Field>
           <Field label="Order Value (NGN)"><input style={styles.input} type="number" value={form.orderValueNgn} onChange={(e) => setForm({ ...form, orderValueNgn: Number(e.target.value || 0) })} /></Field>
           <Field label="Next Action Date"><input style={styles.input} type="date" value={form.nextActionDate} onChange={(e) => setForm({ ...form, nextActionDate: e.target.value })} /></Field>
           <Field label="Visit Status"><input style={styles.input} value={form.visitStatus} onChange={(e) => setForm({ ...form, visitStatus: e.target.value })} /></Field>
@@ -904,7 +906,7 @@ function ExportTab({ managers, customers, visits, auditLog, authUsers, settings,
   const visitRows = visits.filter((v) => !v.deletedAt).map((v) => {
     const manager = managers.find((m) => m.id === v.managerId);
     const customer = customers.find((c) => c.id === v.customerId);
-    return { Visit_ID: v.id, Visit_Date: v.visitDate, Manager_ID: v.managerId, Manager_Name: manager?.name || "", Manager_Role: manager?.role || "", Customer_ID: v.customerId, Customer_Name: customer?.name || "", Region: customer?.region || "", State: customer?.state || "", Sales_Type: v.salesType, Visit_Type: v.visitType, Planned_At_Start_Of_Day: v.plannedAtStartOfDay, Objective: v.objective, Outcome: v.outcome, Comments: v.comments, Order_Made: v.orderMade, Order_Value_NGN: v.orderValueNgn, Pipeline_Status: v.pipelineStatus, Next_Action_Date: v.nextActionDate, Visit_Status: v.visitStatus, Updated_At: v.updatedAt, Updated_By: v.updatedBy };
+    return { Visit_ID: v.id, Visit_Date: v.visitDate, Manager_ID: v.managerId, Manager_Name: manager?.name || "", Manager_Role: manager?.role || "", Customer_ID: v.customerId, Customer_Name: customer?.name || "", Region: customer?.region || "", State: customer?.state || "", Sales_Type: v.salesType, Visit_Type: v.visitType, Planned_At_Start_Of_Day: v.plannedAtStartOfDay, Objective: v.objective, Outcome: v.outcome, Comments: v.comments, Order_Made: v.orderMade, Order_Qty_MT: v.orderQtyMt, Order_Value_NGN: v.orderValueNgn, Pipeline_Status: v.pipelineStatus, Next_Action_Date: v.nextActionDate, Visit_Status: v.visitStatus, Updated_At: v.updatedAt, Updated_By: v.updatedBy };
   });
   const auditRows = auditLog.filter((a) => !a.deletedAt);
   const activeManagers = managers.filter((m) => !m.deletedAt);
