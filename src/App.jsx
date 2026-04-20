@@ -632,6 +632,26 @@ function getVisibleVisits(allVisits, allCustomers, allManagers, currentManager) 
   return allVisits.filter((v) => !v.deletedAt && visibleCustomerIds.has(v.customerId) && visibleManagerIds.has(v.managerId));
 }
 
+function usePagination(data, itemsPerPage = 10) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(data.length / itemsPerPage));
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [data.length, itemsPerPage]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedData = data.slice(startIndex, startIndex + itemsPerPage);
+
+  return {
+    currentPage,
+    totalPages,
+    paginatedData,
+    nextPage: () => setCurrentPage((p) => Math.min(p + 1, totalPages)),
+    prevPage: () => setCurrentPage((p) => Math.max(p - 1, 1)),
+  };
+}
+
 function Field({ label, children }) {
   return (
     <div>
@@ -671,6 +691,17 @@ function Modal({ open, title, children, onClose }) {
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+function PaginationControls({ currentPage, totalPages, onNext, onPrev }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+      <Button secondary onClick={onPrev} disabled={currentPage === 1}>← Previous</Button>
+      <div style={{ fontSize: 13, color: "#64748b" }}>
+        Page {currentPage} of {totalPages || 1}
+      </div>
+      <Button secondary onClick={onNext} disabled={currentPage === totalPages}>Next →</Button>
     </div>
   );
 }
@@ -1022,6 +1053,22 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     })
     .sort((a, b) => b.opportunityScore - a.opportunityScore);
 
+  const {
+    currentPage: managerPage,
+    totalPages: managerTotalPages,
+    paginatedData: paginatedManagers,
+    nextPage: nextManagerPage,
+    prevPage: prevManagerPage,
+  } = usePagination(byManager, 8);
+
+  const {
+    currentPage: customerTrackerPage,
+    totalPages: customerTrackerTotalPages,
+    paginatedData: paginatedCustomerProgress,
+    nextPage: nextCustomerTrackerPage,
+    prevPage: prevCustomerTrackerPage,
+  } = usePagination(customerProgressRows, 10);
+
   const visitsWithComments = filteredVisits.filter((v) => String(v.comments || "").trim() !== "").length;
   const commentsCoveragePct = totalVisits ? ((visitsWithComments / totalVisits) * 100).toFixed(1) : "0.0";
   const followUpVisits = filteredVisits.filter((v) => v.pipelineStatus === "Follow-up");
@@ -1250,7 +1297,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
                 </tr>
               </thead>
               <tbody>
-                {byManager.length ? byManager.map((m) => (
+                {byManager.length ? paginatedManagers.map((m) => (
                   <tr key={m.name} onClick={() => setSelectedManagerId(m.id)} style={{ cursor: "pointer" }}>
                     <td style={styles.td}><strong>{m.name}</strong><div style={{ color: "#64748b", fontSize: 12 }}>Click to view intelligence</div></td>
                     <td style={styles.td}>{m.visits}</td>
@@ -1263,6 +1310,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
               </tbody>
             </table>
           </div>
+          <PaginationControls currentPage={managerPage} totalPages={managerTotalPages} onNext={nextManagerPage} onPrev={prevManagerPage} />
         </Card>
       </div>
 
@@ -1398,7 +1446,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
               </tr>
             </thead>
             <tbody>
-              {customerProgressRows.length ? customerProgressRows.map((row) => (
+              {customerProgressRows.length ? paginatedCustomerProgress.map((row) => (
                 <tr key={row.id} onClick={() => setSelectedCustomerId(row.id)} style={{ cursor: "pointer" }}>
                   <td style={styles.td}><strong>{row.customerName}</strong><div style={{ color: "#64748b", fontSize: 12 }}>Click to view history</div></td>
                   <td style={styles.td}>{row.ownerName}</td>
@@ -1417,6 +1465,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
             </tbody>
           </table>
         </div>
+        <PaginationControls currentPage={customerTrackerPage} totalPages={customerTrackerTotalPages} onNext={nextCustomerTrackerPage} onPrev={prevCustomerTrackerPage} />
       </Card>
 
       <Modal
@@ -1537,6 +1586,7 @@ function ManagersTab({ managers, authUsers, setDb, currentManager, session }) {
   const [editing, setEditing] = useState(null);
   const canManage = ADMIN_ROLES.includes(session.role);
   const activeManagers = managers.filter((m) => !m.deletedAt);
+  const { currentPage, totalPages, paginatedData, nextPage, prevPage } = usePagination(activeManagers, 10);
   const [form, setForm] = useState(defaultManagerForm());
 
   useEffect(() => {
@@ -1649,7 +1699,7 @@ function ManagersTab({ managers, authUsers, setDb, currentManager, session }) {
               </tr>
             </thead>
             <tbody>
-              {activeManagers.map((m) => (
+              {paginatedData.map((m) => (
                 <tr key={m.id}>
                   <td style={styles.td}>{m.id}</td>
                   <td style={styles.td}>{m.name}</td>
@@ -1671,6 +1721,7 @@ function ManagersTab({ managers, authUsers, setDb, currentManager, session }) {
             </tbody>
           </table>
         </div>
+        <PaginationControls currentPage={currentPage} totalPages={totalPages} onNext={nextPage} onPrev={prevPage} />
       </Card>
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Manager" : "Add Manager"}>
@@ -1712,6 +1763,7 @@ function CustomersTab({ customers, managers, currentManager, setDb, session }) {
   const canManage = ["NSM", "Sales Operations Admin", "RSM", "ASM"].includes(session.role);
   const visibleCustomers = getVisibleCustomers(customers, managers, currentManager);
   const rows = visibleCustomers.filter((c) => JSON.stringify(c).toLowerCase().includes(search.toLowerCase()));
+  const { currentPage, totalPages, paginatedData, nextPage, prevPage } = usePagination(rows, 10);
 
   useEffect(() => {
     setForm(
@@ -1804,7 +1856,7 @@ function CustomersTab({ customers, managers, currentManager, setDb, session }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((c) => (
+              {paginatedData.map((c) => (
                 <tr key={c.id}>
                   <td style={styles.td}>{c.id}</td>
                   <td style={styles.td}>{c.name}</td>
@@ -1828,6 +1880,7 @@ function CustomersTab({ customers, managers, currentManager, setDb, session }) {
             </tbody>
           </table>
         </div>
+        <PaginationControls currentPage={currentPage} totalPages={totalPages} onNext={nextPage} onPrev={prevPage} />
       </Card>
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Customer" : "Add Customer"}>
@@ -1887,6 +1940,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
     .filter((v) => visibleManagerIds.includes(v.managerId) && activeCustomers.some((c) => c.id === v.customerId))
     .filter((v) => JSON.stringify(v).toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+  const { currentPage, totalPages, paginatedData, nextPage, prevPage } = usePagination(rows, 12);
 
   useEffect(() => {
     setForm(
@@ -2021,7 +2075,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
               </tr>
             </thead>
             <tbody>
-              {rows.map((v) => (
+              {paginatedData.map((v) => (
                 <tr key={v.id}>
                   <td style={styles.td}>{v.visitDate}</td>
                   <td style={styles.td}>{v.manager?.name}</td>
@@ -2045,6 +2099,7 @@ function VisitsTab({ visits, customers, managers, setDb, currentManager, session
             </tbody>
           </table>
         </div>
+        <PaginationControls currentPage={currentPage} totalPages={totalPages} onNext={nextPage} onPrev={prevPage} />
       </Card>
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Visit" : "Add Visit"}>
