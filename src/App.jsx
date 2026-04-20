@@ -839,7 +839,8 @@ function AppHeader({ session, onLogout, onChangePassword, logoUrl }) {
 function Filters({ filters, setFilters, managers, customers }) {
   const availableRegions = Array.from(new Set(customers.map((c) => c.region).filter(Boolean)));
   const availableStates = Array.from(new Set(customers.map((c) => c.state).filter(Boolean)));
-  const resetFilters = () => setFilters({ from: "", to: "", region: "all", state: "all", managerId: "all", pipeline: "all" });
+  const resetFilters = () =>
+    setFilters({ from: "", to: "", region: "all", state: "all", managerId: "all", customerId: "all", pipeline: "all" });
 
   return (
     <Card>
@@ -872,6 +873,12 @@ function Filters({ filters, setFilters, managers, customers }) {
             {managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </Field>
+        <Field label="Customer">
+          <select style={styles.select} value={filters.customerId || "all"} onChange={(e) => setFilters((f) => ({ ...f, customerId: e.target.value }))}>
+            <option value="all">All customers</option>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
         <Field label="Pipeline">
           <select style={styles.select} value={filters.pipeline} onChange={(e) => setFilters((f) => ({ ...f, pipeline: e.target.value }))}>
             <option value="all">All pipeline</option>
@@ -883,11 +890,14 @@ function Filters({ filters, setFilters, managers, customers }) {
   );
 }
 
+
 function Dashboard({ visits, customers, managers, currentManager, filters }) {
   const visibleManagers = getVisibleManagers(managers, currentManager);
   const visibleManagerIds = visibleManagers.map((m) => m.id);
   const activeCustomers = getVisibleCustomers(customers, managers, currentManager);
   const activeVisits = getVisibleVisits(visits, customers, managers, currentManager);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [selectedManagerId, setSelectedManagerId] = useState(null);
 
   const enrichedVisits = activeVisits.map((v) => ({
     ...v,
@@ -900,8 +910,9 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     const regionOk = filters.region === "all" || !filters.region || v.customer?.region === filters.region;
     const stateOk = filters.state === "all" || !filters.state || v.customer?.state === filters.state;
     const managerOk = (filters.managerId === "all" || !filters.managerId || v.managerId === filters.managerId) && visibleManagerIds.includes(v.managerId);
+    const customerOk = filters.customerId === "all" || !filters.customerId || v.customerId === filters.customerId;
     const pipelineOk = filters.pipeline === "all" || !filters.pipeline || v.pipelineStatus === filters.pipeline;
-    return dateOk && regionOk && stateOk && managerOk && pipelineOk;
+    return dateOk && regionOk && stateOk && managerOk && customerOk && pipelineOk;
   });
 
   const totalVisits = filteredVisits.length;
@@ -921,16 +932,30 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     .map((id) => {
       const manager = managers.find((m) => m.id === id);
       const rows = filteredVisits.filter((v) => v.managerId === id);
+      const converted = rows.filter((r) => r.orderMade || r.pipelineStatus === "Converted").length;
+      const commentCoverage = rows.length ? (rows.filter((r) => String(r.comments || "").trim() !== "").length / rows.length) * 100 : 0;
+      const followUps = rows.filter((r) => r.pipelineStatus === "Follow-up");
+      const overdue = followUps.filter((r) => r.nextActionDate && r.nextActionDate < todayISO()).length;
+      const discipline = followUps.length ? ((followUps.length - overdue) / followUps.length) * 100 : 100;
+      const effectiveness = rows.length ? ((((converted / rows.length) * 100) * 0.4) + (discipline * 0.3) + (commentCoverage * 0.3)) : 0;
+
       return {
+        id,
         name: manager?.name || id,
+        role: manager?.role || "Manager",
+        region: manager?.region || "—",
+        states: Array.isArray(manager?.states) ? manager.states.join(", ") : "—",
         visits: rows.length,
-        converted: rows.filter((r) => r.orderMade || r.pipelineStatus === "Converted").length,
+        converted,
         value: rows.reduce((sum, r) => sum + Number(r.orderValueNgn || 0), 0),
         mt: rows.reduce((sum, r) => sum + Number(r.orderQtyMt || 0), 0),
+        commentCoverage,
+        discipline,
+        effectiveness,
       };
     })
     .filter((row) => row.visits > 0)
-    .sort((a, b) => b.visits - a.visits);
+    .sort((a, b) => b.effectiveness - a.effectiveness);
 
   const upcomingFollowUps = filteredVisits
     .filter((v) => v.nextActionDate >= todayISO() && v.pipelineStatus !== "Converted")
@@ -959,66 +984,123 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     })
     .sort((a, b) => b.value - a.value);
 
+  const customerProgressRows = activeCustomers
+    .map((customer) => {
+      const rows = filteredVisits.filter((v) => v.customerId === customer.id).sort((a, b) => a.visitDate.localeCompare(b.visitDate));
+      const lastVisit = rows[rows.length - 1] || null;
+      const converted = rows.some((r) => r.orderMade || r.pipelineStatus === "Converted");
+      const totalMt = rows.reduce((sum, r) => sum + Number(r.orderQtyMt || 0), 0);
+      const totalValue = rows.reduce((sum, r) => sum + Number(r.orderValueNgn || 0), 0);
+      const followUps = rows.filter((r) => r.pipelineStatus === "Follow-up");
+      const overdue = followUps.some((r) => r.nextActionDate && r.nextActionDate < todayISO());
+      let statusTag = "Cold";
+      if (converted) statusTag = "Hot";
+      else if (followUps.length) statusTag = overdue ? "At Risk" : "Warm";
+      const opportunityScore = Math.min(100, (rows.length * 8) + (followUps.length * 12) + (converted ? 30 : 0) + (totalMt * 2));
+
+      return {
+        id: customer.id,
+        customerName: customer.name,
+        ownerName: managers.find((m) => m.id === customer.ownerManagerId)?.name || "—",
+        region: customer.region,
+        state: customer.state,
+        visits: rows.length,
+        lastVisitDate: lastVisit?.visitDate || "—",
+        lastPipeline: lastVisit?.pipelineStatus || "—",
+        nextActionDate: lastVisit?.nextActionDate || "—",
+        lastManagerName: lastVisit?.manager?.name || lastVisit?.managerName || "—",
+        statusTag,
+        totalMt,
+        totalValue,
+        opportunityScore,
+      };
+    })
+    .filter((row) => {
+      const regionOk = filters.region === "all" || !filters.region || row.region === filters.region;
+      const stateOk = filters.state === "all" || !filters.state || row.state === filters.state;
+      return regionOk && stateOk;
+    })
+    .sort((a, b) => b.opportunityScore - a.opportunityScore);
+
   const visitsWithComments = filteredVisits.filter((v) => String(v.comments || "").trim() !== "").length;
   const commentsCoveragePct = totalVisits ? ((visitsWithComments / totalVisits) * 100).toFixed(1) : "0.0";
   const followUpVisits = filteredVisits.filter((v) => v.pipelineStatus === "Follow-up");
   const overdueFollowUps = followUpVisits.filter((v) => v.nextActionDate && v.nextActionDate < todayISO()).length;
-  const followUpDisciplinePct = followUpVisits.length
-    ? (((followUpVisits.length - overdueFollowUps) / followUpVisits.length) * 100).toFixed(1)
-    : "100.0";
+  const followUpDisciplinePct = followUpVisits.length ? (((followUpVisits.length - overdueFollowUps) / followUpVisits.length) * 100).toFixed(1) : "100.0";
   const avgOrderMt = convertedVisits ? (totalOrderMt / convertedVisits).toFixed(2) : "0.00";
   const avgOrderValue = convertedVisits ? Math.round(totalOrderValue / convertedVisits) : 0;
   const topTerritory = territoryRows[0] || null;
-  const weakestTerritory =
-    [...territoryRows].filter((t) => t.visits > 0).sort((a, b) => Number(a.conversionPct) - Number(b.conversionPct))[0] || null;
+  const weakestTerritory = [...territoryRows].filter((t) => t.visits > 0).sort((a, b) => Number(a.conversionPct) - Number(b.conversionPct))[0] || null;
   const topManager = byManager[0] || null;
-  const lowEfficiencyManager =
-    [...byManager]
-      .filter((m) => m.visits >= 3)
-      .sort((a, b) => (a.visits ? a.converted / a.visits : 0) - (b.visits ? b.converted / b.visits : 0))[0] || null;
+  const lowEfficiencyManager = [...byManager].filter((m) => m.visits >= 3).sort((a, b) => a.effectiveness - b.effectiveness)[0] || null;
+
   const pipelineStageCounts = {
     prospecting: filteredVisits.filter((v) => v.pipelineStatus === "Prospecting").length,
     followUp: filteredVisits.filter((v) => v.pipelineStatus === "Follow-up").length,
     converted: filteredVisits.filter((v) => v.pipelineStatus === "Converted" || v.orderMade).length,
   };
 
+  const riskFlags = [
+    overdueFollowUps > 0 ? { level: "High", text: `${overdueFollowUps} follow-ups are overdue and need immediate attention.` } : null,
+    weakestTerritory ? { level: Number(weakestTerritory.conversionPct) < 15 ? "High" : "Medium", text: `${weakestTerritory.state} has the weakest conversion rate at ${weakestTerritory.conversionPct}%.` } : null,
+    lowEfficiencyManager ? { level: lowEfficiencyManager.effectiveness < 35 ? "High" : "Medium", text: `${lowEfficiencyManager.name} has the lowest effectiveness score at ${lowEfficiencyManager.effectiveness.toFixed(1)}.` } : null,
+  ].filter(Boolean);
+
+  const executiveSummary = [
+    totalVisits ? `Sales activity is concentrated in ${filteredVisits.length} visible visits with a conversion ratio of ${conversionRatio}%.` : `There is no visible sales activity in the current filter set.`,
+    topTerritory ? `${topTerritory.state} is the strongest territory by value and volume.` : `Territory leadership is not established yet.`,
+    riskFlags.length ? `Immediate management attention is required for ${riskFlags.length} flagged performance risks.` : `The current view shows no urgent execution risk flags.`,
+  ].join(" ");
+
   const insightBullets = [
-    totalVisits
-      ? `${completedVisits} of ${totalVisits} visits were completed, while ${convertedVisits} resulted in orders or marked conversions.`
-      : `No visits match the selected filters yet.`,
+    totalVisits ? `${completedVisits} of ${totalVisits} visits were completed, while ${convertedVisits} resulted in orders or marked conversions.` : `No visits match the selected filters yet.`,
     `${commentsCoveragePct}% of visible visits contain comments, giving management ${Number(commentsCoveragePct) >= 70 ? "strong" : "limited"} qualitative feedback coverage.`,
-    followUpVisits.length
-      ? `${overdueFollowUps} follow-ups are overdue, so follow-up discipline is currently ${followUpDisciplinePct}%.`
-      : `There are no active follow-up visits in the current filtered view.`,
-    topTerritory
-      ? `${topTerritory.state}, ${topTerritory.region} currently leads territory performance with ${topTerritory.mt.toFixed(2)} MT and ${topTerritory.conversionPct}% conversion.`
-      : `No territory performance insight is available yet.`,
-    weakestTerritory
-      ? `${weakestTerritory.state}, ${weakestTerritory.region} has the weakest conversion rate at ${weakestTerritory.conversionPct}%, suggesting pricing, follow-up, or targeting issues.`
-      : `No weak territory alert is available yet.`,
-    topManager
-      ? `${topManager.name} is leading visible manager output with ${topManager.mt.toFixed(2)} MT and ${currency(topManager.value)} in order value.`
-      : `No manager performance insight is available yet.`,
-    lowEfficiencyManager && lowEfficiencyManager.name !== topManager?.name
-      ? `${lowEfficiencyManager.name} shows high activity relative to results, which suggests a need to review visit quality, customer mix, or closing approach.`
-      : `No manager efficiency risk flag is triggered right now.`,
-    convertedVisits
-      ? `Average converted order size is ${avgOrderMt} MT with an average order value of ${currency(avgOrderValue)}.`
-      : `Average order size and value will appear after the first conversion.`,
+    followUpVisits.length ? `${overdueFollowUps} follow-ups are overdue, so follow-up discipline is currently ${followUpDisciplinePct}%.` : `There are no active follow-up visits in the current filtered view.`,
+    topTerritory ? `${topTerritory.state}, ${topTerritory.region} currently leads territory performance with ${topTerritory.mt.toFixed(2)} MT and ${topTerritory.conversionPct}% conversion.` : `No territory performance insight is available yet.`,
+    weakestTerritory ? `${weakestTerritory.state}, ${weakestTerritory.region} has the weakest conversion rate at ${weakestTerritory.conversionPct}%, suggesting pricing, follow-up, or targeting issues.` : `No weak territory alert is available yet.`,
+    topManager ? `${topManager.name} is leading visible manager output with ${topManager.mt.toFixed(2)} MT, ${currency(topManager.value)}, and an effectiveness score of ${topManager.effectiveness.toFixed(1)}.` : `No manager performance insight is available yet.`,
+    lowEfficiencyManager && lowEfficiencyManager.name !== topManager?.name ? `${lowEfficiencyManager.name} shows high activity relative to results, which suggests a need to review visit quality, customer mix, or closing approach.` : `No manager efficiency risk flag is triggered right now.`,
+    convertedVisits ? `Average converted order size is ${avgOrderMt} MT with an average order value of ${currency(avgOrderValue)}.` : `Average order size and value will appear after the first conversion.`,
     `Pipeline mix currently stands at ${pipelineStageCounts.prospecting} prospecting, ${pipelineStageCounts.followUp} follow-up, and ${pipelineStageCounts.converted} converted visits.`,
   ];
 
-  const executiveSummary = [
-    totalVisits
-      ? `Sales activity is concentrated in ${filteredVisits.length} visible visits with a conversion ratio of ${conversionRatio}%.`
-      : `There is no visible sales activity in the current filter set.`,
-    topTerritory
-      ? `${topTerritory.state} is the strongest territory by value and volume.`
-      : `Territory leadership is not established yet.`,
-    overdueFollowUps > 0
-      ? `The biggest execution risk is overdue follow-up on ${overdueFollowUps} opportunities.`
-      : `The main opportunity is to sustain follow-up discipline and raise conversion efficiency further.`,
-  ].join(" ");
+  const selectedManager = byManager.find((row) => row.id === selectedManagerId) || null;
+  const selectedManagerVisitHistory = selectedManager
+    ? filteredVisits.filter((v) => v.managerId === selectedManager.id).sort((a, b) => a.visitDate.localeCompare(b.visitDate))
+    : [];
+  const selectedManagerTimeline = selectedManagerVisitHistory.map((visit, index) => ({
+    step: index + 1,
+    date: visit.visitDate,
+    customerName: visit.customer?.name || "—",
+    visitType: visit.visitType,
+    pipelineStatus: visit.pipelineStatus,
+    outcome: visit.outcome || "—",
+    comments: visit.comments || "—",
+    orderMt: Number(visit.orderQtyMt || 0),
+    orderValue: Number(visit.orderValueNgn || 0),
+    nextActionDate: visit.nextActionDate || "—",
+    status: visit.visitStatus || "—",
+  }));
+
+  const selectedCustomer = customerProgressRows.find((row) => row.id === selectedCustomerId) || null;
+  const selectedCustomerVisitHistory = selectedCustomer
+    ? filteredVisits
+        .filter((v) => v.customerId === selectedCustomer.id)
+        .sort((a, b) => a.visitDate.localeCompare(b.visitDate))
+    : [];
+  const selectedCustomerTimeline = selectedCustomerVisitHistory.map((visit, index) => ({
+    step: index + 1,
+    date: visit.visitDate,
+    managerName: visit.manager?.name || "—",
+    visitType: visit.visitType,
+    pipelineStatus: visit.pipelineStatus,
+    outcome: visit.outcome || "—",
+    comments: visit.comments || "—",
+    orderMt: Number(visit.orderQtyMt || 0),
+    orderValue: Number(visit.orderValueNgn || 0),
+    nextActionDate: visit.nextActionDate || "—",
+    status: visit.visitStatus || "—",
+  }));
 
   const visualInsightCards = [
     {
@@ -1050,84 +1132,94 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
     },
   ];
 
+  const smartSignals = [
+    { title: "Top Manager", value: topManager ? topManager.name : "—", detail: topManager ? `${topManager.effectiveness.toFixed(1)} effectiveness score` : "No data" },
+    { title: "Top Territory", value: topTerritory ? `${topTerritory.state}` : "—", detail: topTerritory ? `${topTerritory.mt.toFixed(2)} MT` : "No data" },
+    { title: "Top Opportunity Customer", value: customerProgressRows[0]?.customerName || "—", detail: customerProgressRows[0] ? `${customerProgressRows[0].opportunityScore.toFixed(0)} opportunity score` : "No data" },
+    { title: "Urgent Action", value: overdueFollowUps ? `${overdueFollowUps} overdue` : "Stable", detail: overdueFollowUps ? "Follow-ups need escalation" : "No urgent follow-up risk" },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card>
         <h3 style={{ marginTop: 0 }}>Qualitative Analysis</h3>
-        <div style={{ color: "#475569", lineHeight: 1.6, marginBottom: 14 }}>
-          This section interprets sales execution quality, pipeline movement, and territory health before the raw KPI totals below.
-        </div>
-        <div style={styles.grid2}>
-          {visualInsightCards.map((card) => (
-            <div
-              key={card.title}
-              style={{
-                border: "1px solid #ecfdf5",
-                borderRadius: 16,
-                padding: 16,
-                background: "#ffffff",
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>{card.title}</div>
-              <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>{card.subtitle}</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {card.rows.map((row) => (
-                  <div key={row.label}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 14 }}>
-                      <span>{row.label}</span>
-                      <span>{row.value}</span>
-                    </div>
-                    <div style={{ height: 10, background: "#dcfce7", borderRadius: 999 }}>
-                      <div
-                        style={{
-                          height: 10,
-                          background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
-                          borderRadius: 999,
-                          width: `${Math.max(0, Math.min(100, Number(row.pct) || 0))}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <div style={{ color: "#475569", lineHeight: 1.6, marginBottom: 12 }}>{executiveSummary}</div>
+        <div style={styles.grid4}>
+          {smartSignals.map((signal) => (
+            <div key={signal.title} style={{ border: "1px solid #ecfdf5", borderRadius: 16, padding: 14, background: "#ffffff" }}>
+              <div style={{ color: "#64748b", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>{signal.title}</div>
+              <div style={{ fontWeight: 800, fontSize: 20, marginTop: 8 }}>{signal.value}</div>
+              <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>{signal.detail}</div>
             </div>
           ))}
         </div>
       </Card>
 
       <Card>
-        <h3 style={{ marginTop: 0 }}>Quantitative Analysis</h3>
-        <div style={{ color: "#64748b", marginBottom: 12 }}>Core numeric KPIs for activity, conversion, order volume, and value.</div>
-        <div style={styles.grid4}>
-        {[
-          { label: "Total Visits", value: totalVisits },
-          { label: "Completed Visits", value: completedVisits },
-          { label: "Conversion Ratio", value: `${conversionRatio}%` },
-          { label: "Order Value", value: currency(totalOrderValue) },
-          { label: "Order Volume", value: `${totalOrderMt.toFixed(2)} MT` },
-          { label: "Planned Visits", value: plannedVisits },
-        ].map((kpi) => (
-          <Card key={kpi.label}>
-            <div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div>
+        <h3 style={{ marginTop: 0 }}>Risk Flags</h3>
+        <div style={{ display: "grid", gap: 10 }}>
+          {riskFlags.length ? riskFlags.map((flag, index) => (
+            <div key={index} style={{ display: "flex", justifyContent: "space-between", gap: 12, border: "1px solid #ecfdf5", borderRadius: 14, padding: 12, background: "#ffffff" }}>
+              <div>{flag.text}</div>
+              <Badge>{flag.level}</Badge>
+            </div>
+          )) : <div style={{ color: "#64748b" }}>No active risk flags in the current filtered view.</div>}
+        </div>
+      </Card>
+
+      <div style={styles.grid2}>
+        {visualInsightCards.map((card) => (
+          <Card key={card.title}>
+            <h3 style={{ marginTop: 0, marginBottom: 6 }}>{card.title}</h3>
+            <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>{card.subtitle}</div>
+            <div style={{ display: "grid", gap: 12 }}>
+              {card.rows.map((row) => (
+                <div key={row.label}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                  <div style={{ height: 10, background: "#dcfce7", borderRadius: 999 }}>
+                    <div style={{ height: 10, width: `${Math.max(0, Math.min(100, row.pct))}%`, background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", borderRadius: 999 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </Card>
         ))}
       </div>
 
-      <div style={styles.grid4}>
-        {[
-          { label: "Comment Coverage", value: `${commentsCoveragePct}%` },
-          { label: "Overdue Follow-ups", value: overdueFollowUps },
-          { label: "Follow-up Discipline", value: `${followUpDisciplinePct}%` },
-          { label: "Avg Order Size", value: `${avgOrderMt} MT` },
-          { label: "Avg Order Value", value: currency(avgOrderValue) },
-        ].map((kpi) => (
-          <Card key={kpi.label}>
-            <div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div>
-          </Card>
-        ))}
-      </div>
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Quantitative Analysis</h3>
+        <div style={styles.grid4}>
+          {[
+            { label: "Total Visits", value: totalVisits },
+            { label: "Completed Visits", value: completedVisits },
+            { label: "Conversion Ratio", value: `${conversionRatio}%` },
+            { label: "Order Value", value: currency(totalOrderValue) },
+            { label: "Order Volume", value: `${totalOrderMt.toFixed(2)} MT` },
+            { label: "Planned Visits", value: plannedVisits },
+          ].map((kpi) => (
+            <div key={kpi.label} style={{ border: "1px solid #ecfdf5", borderRadius: 16, padding: 14, background: "#ffffff" }}>
+              <div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ ...styles.grid4, marginTop: 14 }}>
+          {[
+            { label: "Comment Coverage", value: `${commentsCoveragePct}%` },
+            { label: "Overdue Follow-ups", value: overdueFollowUps },
+            { label: "Follow-up Discipline", value: `${followUpDisciplinePct}%` },
+            { label: "Avg Order Size", value: `${avgOrderMt} MT` },
+            { label: "Avg Order Value", value: currency(avgOrderValue) },
+          ].map((kpi) => (
+            <div key={kpi.label} style={{ border: "1px solid #ecfdf5", borderRadius: 16, padding: 14, background: "#ffffff" }}>
+              <div style={{ color: "#64748b", fontSize: 13 }}>{kpi.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>{kpi.value}</div>
+            </div>
+          ))}
+        </div>
       </Card>
 
       <div style={styles.grid2}>
@@ -1141,14 +1233,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
                   <span>{row.value}</span>
                 </div>
                 <div style={{ height: 8, background: "#dcfce7", borderRadius: 999 }}>
-                  <div
-                    style={{
-                      height: 8,
-                      background: "#16a34a",
-                      borderRadius: 999,
-                      width: `${totalVisits ? Math.round((row.value / totalVisits) * 100) : 0}%`,
-                    }}
-                  />
+                  <div style={{ height: 8, background: "#16a34a", borderRadius: 999, width: `${totalVisits ? Math.round((row.value / totalVisits) * 100) : 0}%` }} />
                 </div>
               </div>
             ))}
@@ -1156,38 +1241,116 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
         </Card>
 
         <Card>
-          <h3 style={{ marginTop: 0 }}>Manager Performance</h3>
+          <h3 style={{ marginTop: 0 }}>Manager Intelligence</h3>
           <div style={styles.tableWrap}>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  {["Manager", "Visits", "Converted", "Conversion %", "Order MT", "Order Value"].map((h) => (
-                    <th key={h} style={styles.th}>{h}</th>
-                  ))}
+                  {["Manager", "Visits", "Converted", "Effectiveness", "Order MT", "Order Value"].map((h) => <th key={h} style={styles.th}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {byManager.length ? (
-                  byManager.map((m) => (
-                    <tr key={m.name}>
-                      <td style={styles.td}>{m.name}</td>
-                      <td style={styles.td}>{m.visits}</td>
-                      <td style={styles.td}>{m.converted}</td>
-                      <td style={styles.td}>{m.visits ? ((m.converted / m.visits) * 100).toFixed(1) : 0}%</td>
-                      <td style={styles.td}>{m.mt.toFixed(2)} MT</td>
-                      <td style={styles.td}>{currency(m.value)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td style={styles.td} colSpan={6}>No records for selected filters.</td>
+                {byManager.length ? byManager.map((m) => (
+                  <tr key={m.name} onClick={() => setSelectedManagerId(m.id)} style={{ cursor: "pointer" }}>
+                    <td style={styles.td}><strong>{m.name}</strong><div style={{ color: "#64748b", fontSize: 12 }}>Click to view intelligence</div></td>
+                    <td style={styles.td}>{m.visits}</td>
+                    <td style={styles.td}>{m.converted}</td>
+                    <td style={styles.td}>{m.effectiveness.toFixed(1)}</td>
+                    <td style={styles.td}>{m.mt.toFixed(2)} MT</td>
+                    <td style={styles.td}>{currency(m.value)}</td>
                   </tr>
-                )}
+                )) : <tr><td style={styles.td} colSpan={6}>No records for selected filters.</td></tr>}
               </tbody>
             </table>
           </div>
         </Card>
       </div>
+
+      <Modal
+        open={Boolean(selectedManager)}
+        onClose={() => setSelectedManagerId(null)}
+        title={selectedManager ? `${selectedManager.name} — Manager Intelligence Timeline` : "Manager Intelligence"}
+      >
+        {selectedManager ? (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={styles.grid4}>
+              {[
+                { label: "Role", value: selectedManager.role },
+                { label: "Region", value: selectedManager.region },
+                { label: "States", value: selectedManager.states || "—" },
+                { label: "Visits", value: selectedManager.visits },
+                { label: "Converted", value: selectedManager.converted },
+                { label: "Effectiveness", value: selectedManager.effectiveness.toFixed(1) },
+                { label: "Comment Coverage", value: `${selectedManager.commentCoverage.toFixed(1)}%` },
+                { label: "Follow-up Discipline", value: `${selectedManager.discipline.toFixed(1)}%` },
+                { label: "Order MT", value: `${selectedManager.mt.toFixed(2)} MT` },
+                { label: "Order Value", value: currency(selectedManager.value) },
+              ].map((item) => (
+                <Card key={item.label}>
+                  <div style={{ color: "#64748b", fontSize: 13 }}>{item.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, marginTop: 8 }}>{item.value}</div>
+                </Card>
+              ))}
+            </div>
+
+            <Card>
+              <h3 style={{ marginTop: 0 }}>Manager Timeline</h3>
+              <div style={{ display: "grid", gap: 12 }}>
+                {selectedManagerTimeline.length ? selectedManagerTimeline.map((item) => (
+                  <div key={`${item.step}-${item.date}-${item.customerName}`} style={{ display: "grid", gridTemplateColumns: "32px 1fr", gap: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 999, background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>{item.step}</div>
+                      <div style={{ width: 2, flex: 1, background: "#dcfce7", marginTop: 6 }} />
+                    </div>
+                    <div style={{ border: "1px solid #ecfdf5", borderRadius: 14, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <strong>{item.date} • {item.customerName}</strong>
+                        <Badge>{item.pipelineStatus}</Badge>
+                      </div>
+                      <div style={{ color: "#475569", marginTop: 8 }}>Visit Type: {item.visitType}</div>
+                      <div style={{ color: "#475569" }}>Outcome: {item.outcome}</div>
+                      <div style={{ color: "#475569" }}>Comments: {item.comments}</div>
+                      <div style={{ color: "#475569" }}>Next Action: {item.nextActionDate}</div>
+                      <div style={{ color: "#475569" }}>Visit Status: {item.status}</div>
+                      <div style={{ color: "#475569" }}>Order: {item.orderMt.toFixed(2)} MT • {currency(item.orderValue)}</div>
+                    </div>
+                  </div>
+                )) : <div style={{ color: "#64748b" }}>No visit history available for this manager yet.</div>}
+              </div>
+            </Card>
+
+            <Card>
+              <h3 style={{ marginTop: 0 }}>Manager Visit History Table</h3>
+              <div style={styles.tableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      {["Date", "Customer", "Visit Type", "Pipeline", "Outcome", "Comments", "Order MT", "Order Value", "Next Action"].map((h) => (
+                        <th key={h} style={styles.th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedManagerTimeline.length ? selectedManagerTimeline.map((item) => (
+                      <tr key={`mgr-row-${item.step}-${item.date}-${item.customerName}`}>
+                        <td style={styles.td}>{item.date}</td>
+                        <td style={styles.td}>{item.customerName}</td>
+                        <td style={styles.td}>{item.visitType}</td>
+                        <td style={styles.td}>{item.pipelineStatus}</td>
+                        <td style={styles.td}>{item.outcome}</td>
+                        <td style={styles.td}>{item.comments}</td>
+                        <td style={styles.td}>{item.orderMt.toFixed(2)} MT</td>
+                        <td style={styles.td}>{currency(item.orderValue)}</td>
+                        <td style={styles.td}>{item.nextActionDate}</td>
+                      </tr>
+                    )) : <tr><td style={styles.td} colSpan={9}>No visit history available.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        ) : null}
+      </Modal>
 
       <div style={styles.grid2}>
         <Card>
@@ -1201,55 +1364,15 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
         <Card>
           <h3 style={{ marginTop: 0 }}>Upcoming Follow-ups</h3>
           <div style={{ display: "grid", gap: 8 }}>
-            {upcomingFollowUps.length ? (
-              upcomingFollowUps.map((v) => (
-                <div key={v.id} style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 10 }}>
-                  <div style={{ fontWeight: 600 }}>{v.customer?.name}</div>
-                  <div style={{ color: "#64748b", fontSize: 13 }}>
-                    {v.manager?.name} • {v.nextActionDate}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div style={{ color: "#64748b" }}>No upcoming follow-ups.</div>
-            )}
+            {upcomingFollowUps.length ? upcomingFollowUps.map((v) => (
+              <div key={v.id} style={{ border: "1px solid #ecfdf5", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontWeight: 600 }}>{v.customer?.name}</div>
+                <div style={{ color: "#64748b", fontSize: 13 }}>{v.manager?.name} • {v.nextActionDate}</div>
+              </div>
+            )) : <div style={{ color: "#64748b" }}>No upcoming follow-ups.</div>}
           </div>
         </Card>
       </div>
-
-<div style={styles.grid2}>
-  {visualInsightCards.map((card) => (
-    <Card key={card.title}>
-      <h3 style={{ marginTop: 0 }}>{card.title}</h3>
-      <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>{card.subtitle}</div>
-      <div style={{ display: "grid", gap: 12 }}>
-        {card.rows.map((row) => (
-          <div key={row.label}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span>{row.label}</span>
-              <strong>{row.value}</strong>
-            </div>
-            <div style={{ height: 10, background: "#dcfce7", borderRadius: 999 }}>
-              <div
-                style={{
-                  height: 10,
-                  background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
-                  borderRadius: 999,
-                  width: `${Math.max(0, Math.min(100, row.pct)).toFixed(0)}%`,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  ))}
-</div>
-
-      <Card>
-        <h3 style={{ marginTop: 0 }}>Executive Summary</h3>
-        <div style={{ color: "#475569", lineHeight: 1.6 }}>{executiveSummary}</div>
-      </Card>
 
       <Card>
         <h3 style={{ marginTop: 0 }}>Auto-Generated Qualitative Insights</h3>
@@ -1264,35 +1387,143 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
       </Card>
 
       <Card>
-        <h3 style={{ marginTop: 0 }}>Territory KPIs</h3>
+        <h3 style={{ marginTop: 0 }}>Customer Progress Tracker</h3>
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <thead>
               <tr>
-                {["Region", "State", "Customers", "Visits", "Converted", "Conversion %", "Order MT", "Order Value"].map((h) => (
+                {["Customer", "Owner", "Region", "State", "Visits", "Last Visit", "Pipeline", "Next Action", "Status", "Order MT", "Order Value", "Opportunity Score"].map((h) => (
                   <th key={h} style={styles.th}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {territoryRows.length ? (
-                territoryRows.map((t) => (
-                  <tr key={`${t.region}-${t.state}`}>
-                    <td style={styles.td}>{t.region}</td>
-                    <td style={styles.td}>{t.state}</td>
-                    <td style={styles.td}>{t.customers}</td>
-                    <td style={styles.td}>{t.visits}</td>
-                    <td style={styles.td}>{t.converted}</td>
-                    <td style={styles.td}>{t.conversionPct}%</td>
-                    <td style={styles.td}>{t.mt.toFixed(2)} MT</td>
-                    <td style={styles.td}>{currency(t.value)}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td style={styles.td} colSpan={8}>No territory records for selected filters.</td>
+              {customerProgressRows.length ? customerProgressRows.map((row) => (
+                <tr key={row.id} onClick={() => setSelectedCustomerId(row.id)} style={{ cursor: "pointer" }}>
+                  <td style={styles.td}><strong>{row.customerName}</strong><div style={{ color: "#64748b", fontSize: 12 }}>Click to view history</div></td>
+                  <td style={styles.td}>{row.ownerName}</td>
+                  <td style={styles.td}>{row.region}</td>
+                  <td style={styles.td}>{row.state}</td>
+                  <td style={styles.td}>{row.visits}</td>
+                  <td style={styles.td}>{row.lastVisitDate}</td>
+                  <td style={styles.td}>{row.lastPipeline}</td>
+                  <td style={styles.td}>{row.nextActionDate}</td>
+                  <td style={styles.td}><Badge>{row.statusTag}</Badge></td>
+                  <td style={styles.td}>{row.totalMt.toFixed(2)} MT</td>
+                  <td style={styles.td}>{currency(row.totalValue)}</td>
+                  <td style={styles.td}>{row.opportunityScore.toFixed(0)}</td>
                 </tr>
-              )}
+              )) : <tr><td style={styles.td} colSpan={12}>No customer progress records for selected filters.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Modal
+        open={Boolean(selectedCustomer)}
+        onClose={() => setSelectedCustomerId(null)}
+        title={selectedCustomer ? `${selectedCustomer.customerName} — Visit History & Progress Timeline` : "Customer Timeline"}
+      >
+        {selectedCustomer ? (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={styles.grid4}>
+              {[
+                { label: "Owner", value: selectedCustomer.ownerName },
+                { label: "Visits", value: selectedCustomer.visits },
+                { label: "Current Status", value: selectedCustomer.statusTag },
+                { label: "Total Order MT", value: `${selectedCustomer.totalMt.toFixed(2)} MT` },
+                { label: "Total Order Value", value: currency(selectedCustomer.totalValue) },
+                { label: "Opportunity Score", value: selectedCustomer.opportunityScore.toFixed(0) },
+              ].map((item) => (
+                <Card key={item.label}>
+                  <div style={{ color: "#64748b", fontSize: 13 }}>{item.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, marginTop: 8 }}>{item.value}</div>
+                </Card>
+              ))}
+            </div>
+
+            <Card>
+              <h3 style={{ marginTop: 0 }}>Progress Timeline</h3>
+              <div style={{ display: "grid", gap: 12 }}>
+                {selectedCustomerTimeline.length ? selectedCustomerTimeline.map((item) => (
+                  <div key={`${item.step}-${item.date}`} style={{ display: "grid", gridTemplateColumns: "32px 1fr", gap: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 999, background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>{item.step}</div>
+                      <div style={{ width: 2, flex: 1, background: "#dcfce7", marginTop: 6 }} />
+                    </div>
+                    <div style={{ border: "1px solid #ecfdf5", borderRadius: 14, padding: 12, background: "#fff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <strong>{item.date}</strong>
+                        <Badge>{item.pipelineStatus}</Badge>
+                      </div>
+                      <div style={{ color: "#475569", marginTop: 8 }}>Manager: {item.managerName}</div>
+                      <div style={{ color: "#475569" }}>Visit Type: {item.visitType}</div>
+                      <div style={{ color: "#475569" }}>Outcome: {item.outcome}</div>
+                      <div style={{ color: "#475569" }}>Comments: {item.comments}</div>
+                      <div style={{ color: "#475569" }}>Next Action: {item.nextActionDate}</div>
+                      <div style={{ color: "#475569" }}>Visit Status: {item.status}</div>
+                      <div style={{ color: "#475569" }}>Order: {item.orderMt.toFixed(2)} MT • {currency(item.orderValue)}</div>
+                    </div>
+                  </div>
+                )) : <div style={{ color: "#64748b" }}>No visit history available for this customer yet.</div>}
+              </div>
+            </Card>
+
+            <Card>
+              <h3 style={{ marginTop: 0 }}>Visit History Table</h3>
+              <div style={styles.tableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      {["Date", "Manager", "Visit Type", "Pipeline", "Outcome", "Comments", "Order MT", "Order Value", "Next Action"].map((h) => (
+                        <th key={h} style={styles.th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedCustomerTimeline.length ? selectedCustomerTimeline.map((item) => (
+                      <tr key={`row-${item.step}-${item.date}`}>
+                        <td style={styles.td}>{item.date}</td>
+                        <td style={styles.td}>{item.managerName}</td>
+                        <td style={styles.td}>{item.visitType}</td>
+                        <td style={styles.td}>{item.pipelineStatus}</td>
+                        <td style={styles.td}>{item.outcome}</td>
+                        <td style={styles.td}>{item.comments}</td>
+                        <td style={styles.td}>{item.orderMt.toFixed(2)} MT</td>
+                        <td style={styles.td}>{currency(item.orderValue)}</td>
+                        <td style={styles.td}>{item.nextActionDate}</td>
+                      </tr>
+                    )) : <tr><td style={styles.td} colSpan={9}>No visit history available.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Territory KPIs</h3>
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {["Region", "State", "Customers", "Visits", "Converted", "Conversion %", "Order MT", "Order Value"].map((h) => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {territoryRows.length ? territoryRows.map((t) => (
+                <tr key={`${t.region}-${t.state}`}>
+                  <td style={styles.td}>{t.region}</td>
+                  <td style={styles.td}>{t.state}</td>
+                  <td style={styles.td}>{t.customers}</td>
+                  <td style={styles.td}>{t.visits}</td>
+                  <td style={styles.td}>{t.converted}</td>
+                  <td style={styles.td}>{t.conversionPct}%</td>
+                  <td style={styles.td}>{t.mt.toFixed(2)} MT</td>
+                  <td style={styles.td}>{currency(t.value)}</td>
+                </tr>
+              )) : <tr><td style={styles.td} colSpan={8}>No territory records for selected filters.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2234,7 +2465,7 @@ export default function TMDKSalesForceApp() {
   const [session, setSession] = useBackendSession();
   const [syncStatus, setSyncStatus] = useState("Waiting for backend connection.");
   const [syncing, setSyncing] = useState(false);
-  const [filters, setFilters] = useState({ from: "", to: "", region: "all", state: "all", managerId: "all", pipeline: "all" });
+  const [filters, setFilters] = useState({ from: "", to: "", region: "all", state: "all", managerId: "all", customerId: "all", pipeline: "all" });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [tab, setTab] = useState("dashboard");
 
