@@ -1020,9 +1020,85 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
       : `The main opportunity is to sustain follow-up discipline and raise conversion efficiency further.`,
   ].join(" ");
 
+  const visualInsightCards = [
+    {
+      title: "Pipeline Progression",
+      subtitle: "How visits are moving through the funnel",
+      rows: [
+        { label: "Prospecting", value: pipelineStageCounts.prospecting, pct: totalVisits ? (pipelineStageCounts.prospecting / totalVisits) * 100 : 0 },
+        { label: "Follow-up", value: pipelineStageCounts.followUp, pct: totalVisits ? (pipelineStageCounts.followUp / totalVisits) * 100 : 0 },
+        { label: "Converted", value: pipelineStageCounts.converted, pct: totalVisits ? (pipelineStageCounts.converted / totalVisits) * 100 : 0 },
+      ],
+    },
+    {
+      title: "Execution Discipline",
+      subtitle: "Comment capture and follow-up quality",
+      rows: [
+        { label: "Comment Coverage", value: `${commentsCoveragePct}%`, pct: Number(commentsCoveragePct) },
+        { label: "Follow-up Discipline", value: `${followUpDisciplinePct}%`, pct: Number(followUpDisciplinePct) },
+        { label: "Conversion Ratio", value: `${conversionRatio}%`, pct: Number(conversionRatio) },
+      ],
+    },
+    {
+      title: "Territory Quality Snapshot",
+      subtitle: "Best and weakest territory conversion signals",
+      rows: [
+        { label: topTerritory ? `${topTerritory.state}` : "Top territory", value: topTerritory ? `${topTerritory.conversionPct}%` : "0%", pct: topTerritory ? Number(topTerritory.conversionPct) : 0 },
+        { label: weakestTerritory ? `${weakestTerritory.state}` : "Weakest territory", value: weakestTerritory ? `${weakestTerritory.conversionPct}%` : "0%", pct: weakestTerritory ? Number(weakestTerritory.conversionPct) : 0 },
+        { label: "Avg Order Size", value: `${avgOrderMt} MT`, pct: convertedVisits ? Math.min(100, Number(avgOrderMt) * 10) : 0 },
+      ],
+    },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={styles.grid4}>
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Qualitative Analysis</h3>
+        <div style={{ color: "#475569", lineHeight: 1.6, marginBottom: 14 }}>
+          This section interprets sales execution quality, pipeline movement, and territory health before the raw KPI totals below.
+        </div>
+        <div style={styles.grid2}>
+          {visualInsightCards.map((card) => (
+            <div
+              key={card.title}
+              style={{
+                border: "1px solid #ecfdf5",
+                borderRadius: 16,
+                padding: 16,
+                background: "#ffffff",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>{card.title}</div>
+              <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>{card.subtitle}</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {card.rows.map((row) => (
+                  <div key={row.label}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 14 }}>
+                      <span>{row.label}</span>
+                      <span>{row.value}</span>
+                    </div>
+                    <div style={{ height: 10, background: "#dcfce7", borderRadius: 999 }}>
+                      <div
+                        style={{
+                          height: 10,
+                          background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
+                          borderRadius: 999,
+                          width: `${Math.max(0, Math.min(100, Number(row.pct) || 0))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <h3 style={{ marginTop: 0 }}>Quantitative Analysis</h3>
+        <div style={{ color: "#64748b", marginBottom: 12 }}>Core numeric KPIs for activity, conversion, order volume, and value.</div>
+        <div style={styles.grid4}>
         {[
           { label: "Total Visits", value: totalVisits },
           { label: "Completed Visits", value: completedVisits },
@@ -1052,6 +1128,7 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
           </Card>
         ))}
       </div>
+      </Card>
 
       <div style={styles.grid2}>
         <Card>
@@ -1139,6 +1216,35 @@ function Dashboard({ visits, customers, managers, currentManager, filters }) {
           </div>
         </Card>
       </div>
+
+<div style={styles.grid2}>
+  {visualInsightCards.map((card) => (
+    <Card key={card.title}>
+      <h3 style={{ marginTop: 0 }}>{card.title}</h3>
+      <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>{card.subtitle}</div>
+      <div style={{ display: "grid", gap: 12 }}>
+        {card.rows.map((row) => (
+          <div key={row.label}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
+            <div style={{ height: 10, background: "#dcfce7", borderRadius: 999 }}>
+              <div
+                style={{
+                  height: 10,
+                  background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
+                  borderRadius: 999,
+                  width: `${Math.max(0, Math.min(100, row.pct)).toFixed(0)}%`,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  ))}
+</div>
 
       <Card>
         <h3 style={{ marginTop: 0 }}>Executive Summary</h3>
